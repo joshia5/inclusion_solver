@@ -40,7 +40,6 @@ int main(int argc, char *argv[])
    const char *mesh_file = "";
    int order = 1;
    int maxit = 100;
-   int parallel_ref_levels = 0;
    bool visualization = true;
    bool visit = true;
 
@@ -57,8 +56,6 @@ int main(int argc, char *argv[])
                   "Mesh file to use.");
    args.AddOption(&order, "-o", "--order",
                   "Finite element order (polynomial degree).");
-   args.AddOption(&parallel_ref_levels, "-rp", "--parallel-ref-levels",
-                  "Number of parallel refinement levels.");
    args.AddOption(&e_uniform_, "-uebc", "--uniform-e-bc",
                   "Specify if the three components of the constant "
                   "electric field");
@@ -123,12 +120,6 @@ int main(int argc, char *argv[])
    ParMesh pmesh(MPI_COMM_WORLD, *mesh);
    delete mesh;
 
-   // Refine this mesh in parallel to increase the resolution.
-   int par_ref_levels = parallel_ref_levels;
-   for (int l = 0; l < par_ref_levels; l++)
-   {
-      pmesh.UniformRefinement();
-   }
    // Make sure tet-only meshes are marked for local refinement.
    pmesh.Finalize(true);
 
