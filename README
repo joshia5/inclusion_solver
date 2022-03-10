@@ -1,0 +1,3 @@
+mpirun -np 1 ./inclusion --mesh /home/morteza/Sandbox/inclusion_solver/meshes/setup_1x1_global_coarse_template_mesh.mesh --substrate '92' --inclusion '186' -dbcs '24 42 76 78 80 82' --order 2
+
+mpirun -np 1 ./inclusion --mesh /home/morteza/Sandbox/inclusion_solver/meshes/setup_1x1_global_coarse_template_mesh.mesh --substrate '92' --inclusion '2590 2435 4321 2282 714 2757 875 2918 3861 1823 4494 3711 4184 2145 4031 1992 1366 3409 1527 3570 1060 3103 1221 3264 1696' -dbcs '24 42 76 78 80 82' --order 2
