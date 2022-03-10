@@ -11,7 +11,7 @@ using namespace mfem;
 
 // constants
 // Permittivity of Free Space (units F/m)
-static const double epsilon0_ = 8.8541878176e-12;
+static const double epsilon0_ = 1.; //8.8541878176e-12;
 
 
 class ElementMeshStream : public std::stringstream
