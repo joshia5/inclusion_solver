@@ -401,7 +401,7 @@ InclusionSolver::WriteVisItFields(int it)
       HYPRE_BigInt prob_size = this->GetProblemSize();
       visit_dc_->SetCycle(it);
       visit_dc_->SetTime(prob_size);
-      visit_dc_->Save();
+      /* visit_dc_->Save(); */
 
       if (myid_ == 0) { cout << " done." << endl; }
    }
@@ -451,6 +451,17 @@ InclusionSolver::DisplayToGLVis()
 
    VisualizeField(*socks_["Rho"], vishost, visport,
                   *rho_, "Charge Density", Wx, Wy, Ww, Wh);
-   Wx = 0; Wy += offy; // next line
    if (myid_ == 0) { cout << " done." << endl; }
+}
+
+void
+InclusionSolver::WriteToVtk(const char* name, int res)
+{
+   ofstream ofs;
+   ofs.open(name, ofstream::out);
+   pmesh_->PrintVTK(ofs, res);
+   phi_->SaveVTK(ofs, "potential", res);
+   e_->SaveVTK(ofs, "ElectricField", res);
+   d_->SaveVTK(ofs, "ElectricDisplacementField", res);
+   ofs.close();
 }

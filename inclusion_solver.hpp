@@ -49,6 +49,8 @@ public:
 
    const ParGridFunction & GetVectorPotential() { return *phi_; }
 
+   void WriteToVtk(const char* name, int res=1);
+
 private:
 
    int myid_;      // Local processor rank
