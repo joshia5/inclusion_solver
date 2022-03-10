@@ -4,21 +4,14 @@ using namespace std;
 using namespace mfem;
 
 InclusionSolver::InclusionSolver(ParMesh & pmesh, int order,
-                         Array<int> & dbcs, Vector & dbcv,
-                         Array<int> & nbcs, Vector & nbcv,
+                         Array<int> & dbcs,
                          Coefficient & epsCoef,
-                         double (*phi_bc )(const Vector&),
-                         double (*rho_src)(const Vector&),
-                         void   (*p_src  )(const Vector&, Vector&),
-                         Vector & point_charges)
+                         double (*phi_bc )(const Vector&))
    : myid_(0),
      num_procs_(1),
      order_(order),
      pmesh_(&pmesh),
      dbcs_(&dbcs),
-     dbcv_(&dbcv),
-     nbcs_(&nbcs),
-     nbcv_(&nbcv),
      visit_dc_(NULL),
      H1FESpace_(NULL),
      HCurlFESpace_(NULL),
@@ -36,22 +29,14 @@ InclusionSolver::InclusionSolver(ParMesh & pmesh, int order,
      rt_surf_int_(NULL),
      grad_(NULL),
      phi_(NULL),
-     rho_src_(NULL),
      rho_(NULL),
-     sigma_src_(NULL),
      e_(NULL),
      d_(NULL),
-     p_src_(NULL),
      oneCoef_(1.0),
      epsCoef_(&epsCoef),
      phiBCCoef_(NULL),
-     rhoCoef_(NULL),
      pCoef_(NULL),
-     phi_bc_func_(phi_bc),
-     rho_src_func_(rho_src),
-     p_src_func_(p_src),
-     point_charge_params_(point_charges),
-     point_charges_(0)
+     phi_bc_func_(phi_bc)
 {
    // Initialize MPI variables
    MPI_Comm_size(pmesh_->GetComm(), &num_procs_);
@@ -66,7 +51,16 @@ InclusionSolver::InclusionSolver(ParMesh & pmesh, int order,
    L2FESpace_    = new L2_ParFESpace(pmesh_,order-1,pmesh_->Dimension());
 
    // Select surface attributes for Dirichlet BCs
-   AttrToMarker(pmesh.bdr_attributes.Max(), *dbcs_, ess_bdr_);
+   /* AttrToMarker(pmesh.bdr_attributes.Max(), *dbcs_, ess_bdr_); */
+   ess_bdr_.SetSize(pmesh.bdr_attributes.Max());
+   ess_bdr_ = 0;
+   for (int i=0; i<dbcs.Size(); i++)
+   {
+     int attr = dbcs[i];
+     MFEM_VERIFY(attr > 0, "Attribute number less than one!");
+     ess_bdr_[attr-1] = 1;
+   }
+
 
    // Setup various coefficients
 
@@ -74,19 +68,6 @@ InclusionSolver::InclusionSolver(ParMesh & pmesh, int order,
    if ( phi_bc_func_ != NULL )
    {
       phiBCCoef_ = new FunctionCoefficient(*phi_bc_func_);
-   }
-
-   // Volume Charge Density
-   if ( rho_src_func_ != NULL )
-   {
-      rhoCoef_ = new FunctionCoefficient(rho_src_func_);
-   }
-
-   // Polarization
-   if ( p_src_func_ != NULL )
-   {
-      pCoef_ = new VectorFunctionCoefficient(pmesh_->SpaceDimension(),
-                                             p_src_func_);
    }
 
    // Bilinear Forms
@@ -117,73 +98,21 @@ InclusionSolver::InclusionSolver(ParMesh & pmesh, int order,
    e_    = new ParGridFunction(HCurlFESpace_);
    rho_  = new ParGridFunction(L2FESpace_);
 
-   if ( point_charge_params_.Size() > 0 )
-   {
-      int dim = pmesh_->Dimension();
-      int npts = point_charge_params_.Size() / (dim + 1);
-      point_charges_.resize(npts);
-
-      Vector cent(dim);
-      for (int i=0; i<npts; i++)
-      {
-         for (int d=0; d<dim; d++)
-         {
-            cent[d] = point_charge_params_[(dim + 1) * i + d];
-         }
-         double s = point_charge_params_[(dim + 1) * i + dim];
-
-         point_charges_[i] = new DeltaCoefficient();
-         point_charges_[i]->SetScale(s);
-         point_charges_[i]->SetDeltaCenter(cent);
-
-         rhod_->AddDomainIntegrator(new DomainLFIntegrator(*point_charges_[i]));
-      }
-   }
-
-   if ( rho_src_func_ )
-   {
-      rho_src_ = new ParGridFunction(H1FESpace_);
-
-      h1Mass_ = new ParBilinearForm(H1FESpace_);
-      h1Mass_->AddDomainIntegrator(new MassIntegrator);
-   }
-
-   if ( p_src_func_ )
-   {
-      p_src_ = new ParGridFunction(HCurlFESpace_);
-
-      hCurlHDiv_ = new ParMixedBilinearForm(HCurlFESpace_, HDivFESpace_);
-      hCurlHDiv_->AddDomainIntegrator(new VectorFEMassIntegrator);
-
-      weakDiv_ = new ParMixedBilinearForm(HCurlFESpace_, H1FESpace_);
-      weakDiv_->AddDomainIntegrator(new VectorFEWeakDivergenceIntegrator);
-   }
-
-   if ( nbcs_->Size() > 0 )
-   {
-      sigma_src_ = new ParGridFunction(H1FESpace_);
-
-      h1SurfMass_ = new ParBilinearForm(H1FESpace_);
-      h1SurfMass_->AddBoundaryIntegrator(new MassIntegrator);
-   }
 }
 
 InclusionSolver::~InclusionSolver()
 {
    delete phiBCCoef_;
-   delete rhoCoef_;
+   /* delete rhoCoef_; */
    delete pCoef_;
 
    delete phi_;
-   delete rho_src_;
    delete rho_;
    delete rhod_;
    delete l2_vol_int_;
    delete rt_surf_int_;
-   delete sigma_src_;
    delete d_;
    delete e_;
-   delete p_src_;
 
    delete grad_;
    delete div_;
@@ -201,10 +130,6 @@ InclusionSolver::~InclusionSolver()
    delete HDivFESpace_;
    delete L2FESpace_;
 
-   for (unsigned int i=0; i<point_charges_.size(); i++)
-   {
-      delete point_charges_[i];
-   }
 
    map<string,socketstream*>::iterator mit;
    for (mit=socks_.begin(); mit!=socks_.end(); mit++)
@@ -305,9 +230,6 @@ InclusionSolver::Update()
    d_->Update();
    e_->Update();
    rho_->Update();
-   if ( rho_src_   ) { rho_src_->Update(); }
-   if ( sigma_src_ ) { sigma_src_->Update(); }
-   if ( p_src_     ) { p_src_->Update(); }
 
    // Inform the bilinear forms that the space has changed.
    divEpsGrad_->Update();
@@ -341,53 +263,10 @@ InclusionSolver::Solve()
       }
       else
       {
-         // Apply piecewise constant boundary condition
-         Array<int> dbc_bdr_attr(pmesh_->bdr_attributes.Max());
-         for (int i=0; i<dbcs_->Size(); i++)
-         {
-            ConstantCoefficient voltage((*dbcv_)[i]);
-            dbc_bdr_attr = 0;
-            if ((*dbcs_)[i] <= dbc_bdr_attr.Size())
-            {
-               dbc_bdr_attr[(*dbcs_)[i]-1] = 1;
-            }
-            phi_->ProjectBdrCoefficient(voltage, dbc_bdr_attr);
-         }
+      	 MFEM_VERIFY(0, "The code should not reach here!");
       }
    }
 
-   // Initialize the volumetric charge density
-   if ( rho_src_ )
-   {
-      rho_src_->ProjectCoefficient(*rhoCoef_);
-      h1Mass_->AddMult(*rho_src_, *rhod_);
-   }
-
-   // Initialize the Polarization
-   if ( p_src_ )
-   {
-      p_src_->ProjectCoefficient(*pCoef_);
-      weakDiv_->AddMult(*p_src_, *rhod_);
-   }
-
-   // Initialize the surface charge density
-   if ( sigma_src_ )
-   {
-      *sigma_src_ = 0.0;
-
-      Array<int> nbc_bdr_attr(pmesh_->bdr_attributes.Max());
-      for (int i=0; i<nbcs_->Size(); i++)
-      {
-         ConstantCoefficient sigma_coef((*nbcv_)[i]);
-         nbc_bdr_attr = 0;
-         if ((*nbcs_)[i] <= nbc_bdr_attr.Size())
-         {
-            nbc_bdr_attr[(*nbcs_)[i]-1] = 1;
-         }
-         sigma_src_->ProjectBdrCoefficient(sigma_coef, nbc_bdr_attr);
-      }
-      h1SurfMass_->AddMult(*sigma_src_, *rhod_);
-   }
 
    // Determine the essential BC degrees of freedom
    if ( dbcs_->Size() > 0 )
@@ -438,10 +317,6 @@ InclusionSolver::Solve()
 
    ParGridFunction ed(HDivFESpace_);
    hCurlHDivEps_->Mult(*e_, ed);
-   if ( p_src_ )
-   {
-      hCurlHDiv_->AddMult(*p_src_, ed, -1.0);
-   }
 
    HypreParMatrix MassHDiv;
    Vector ED, D;
@@ -514,9 +389,6 @@ InclusionSolver::RegisterVisItFields(VisItDataCollection & visit_dc)
    visit_dc.RegisterField("D",     d_);
    visit_dc.RegisterField("E",     e_);
    visit_dc.RegisterField("Rho", rho_);
-   if ( rho_src_   ) { visit_dc.RegisterField("Rho Source",     rho_src_); }
-   if ( p_src_     ) { visit_dc.RegisterField("P Source",         p_src_); }
-   if ( sigma_src_ ) { visit_dc.RegisterField("Sigma Source", sigma_src_); }
 }
 
 void
@@ -551,22 +423,6 @@ InclusionSolver::InitializeGLVis()
 
    socks_["Rho"] = new socketstream;
    socks_["Rho"]->precision(8);
-
-   if ( rho_src_ )
-   {
-      socks_["RhoSrc"] = new socketstream;
-      socks_["RhoSrc"]->precision(8);
-   }
-   if ( p_src_ )
-   {
-      socks_["PSrc"] = new socketstream;
-      socks_["PSrc"]->precision(8);
-   }
-   if ( sigma_src_ )
-   {
-      socks_["SigmaSrc"] = new socketstream;
-      socks_["SigmaSrc"]->precision(8);
-   }
 }
 
 void
@@ -596,26 +452,5 @@ InclusionSolver::DisplayToGLVis()
    VisualizeField(*socks_["Rho"], vishost, visport,
                   *rho_, "Charge Density", Wx, Wy, Ww, Wh);
    Wx = 0; Wy += offy; // next line
-
-   if ( rho_src_ )
-   {
-      VisualizeField(*socks_["RhoSrc"], vishost, visport,
-                     *rho_src_, "Charge Density Source (Rho)", Wx, Wy, Ww, Wh);
-      Wx += offx;
-   }
-   if ( p_src_ )
-   {
-      VisualizeField(*socks_["PSrc"], vishost, visport,
-                     *p_src_, "Electric Polarization Source (P)",
-                     Wx, Wy, Ww, Wh);
-      Wx += offx;
-   }
-   if ( sigma_src_ )
-   {
-      VisualizeField(*socks_["SigmaSrc"], vishost, visport,
-                     *sigma_src_, "Surface Charge Density Source (Sigma)",
-                     Wx, Wy, Ww, Wh);
-      // Wx += offx; // not used
-   }
    if (myid_ == 0) { cout << " done." << endl; }
 }

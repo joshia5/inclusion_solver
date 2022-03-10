@@ -22,13 +22,9 @@ class InclusionSolver
 {
 public:
    InclusionSolver(ParMesh & pmesh, int order,
-               Array<int> & dbcs, Vector & dbcv,
-               Array<int> & nbcs, Vector & nbcv,
+               Array<int> & dbcs,
                Coefficient & epsCoef,
-               double (*phi_bc )(const Vector&),
-               double (*rho_src)(const Vector&),
-               void   (*p_src  )(const Vector&, Vector&),
-               Vector & point_charges);
+               double (*phi_bc )(const Vector&));
    ~InclusionSolver();
 
    HYPRE_BigInt GetProblemSize();
@@ -62,9 +58,6 @@ private:
    ParMesh * pmesh_;
 
    Array<int> * dbcs_; // Dirichlet BC Surface Attribute IDs
-   Vector     * dbcv_; // Corresponding Dirichlet Values
-   Array<int> * nbcs_; // Neumann BC Surface Attribute IDs
-   Vector     * nbcv_; // Corresponding Neumann Values
 
    VisItDataCollection * visit_dc_; // To prepare fields for VisIt viewing
 
@@ -91,12 +84,9 @@ private:
    ParDiscreteDivOperator  * div_;  // For Computing rho from D
 
    ParGridFunction * phi_;       // Electric Scalar Potential
-   ParGridFunction * rho_src_;   // Volumetric Charge Density Source
    ParGridFunction * rho_;       // Volumetric Charge Density (Div(D))
-   ParGridFunction * sigma_src_; // Surface Charge Density Source
    ParGridFunction * e_;         // Electric Field
    ParGridFunction * d_;         // Electric Flux Density (aka Dielectric Flux)
-   ParGridFunction * p_src_;     // Polarization Field Source
 
    ConstantCoefficient oneCoef_;   // Coefficient equal to 1
    Coefficient       * epsCoef_;   // Dielectric Permittivity Coefficient
@@ -106,12 +96,7 @@ private:
 
    // Source functions
    double (*phi_bc_func_ )(const Vector&);          // Scalar Potential BC
-   double (*rho_src_func_)(const Vector&);          // Volumetric Charge Density
-   void   (*p_src_func_  )(const Vector&, Vector&); // Polarization Field
 
-   const Vector & point_charge_params_;
-
-   std::vector<DeltaCoefficient*> point_charges_;
 
    std::map<std::string,socketstream*> socks_; // Visualization sockets
 

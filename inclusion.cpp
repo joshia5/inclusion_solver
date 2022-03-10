@@ -4,36 +4,30 @@
 #include <iostream>
 
 // Permittivity Functions
-Coefficient * SetupPermittivityCoefficient();
-
-static Vector pw_eps_(0);     // Piecewise permittivity values
-static Vector ds_params_(0);  // Center, Radius, and Permittivity
-//                               of dielectric sphere
-double dielectric_sphere(const Vector &);
-
-// Charge Density Function
-static Vector cs_params_(0);  // Center, Radius, and Total Charge
-//                               of charged sphere
-double charged_sphere(const Vector &);
-
-// Point Charges
-static Vector pc_params_(0); // Point charge locations and charges
-
-// Polarization
-static Vector vp_params_(0);  // Axis Start, Axis End, Cylinder Radius,
-//                               and Polarization Magnitude
-void voltaic_pile(const Vector &, Vector &);
+Coefficient *
+SetupPermittivityCoefficient(int max_attr, // max attribute in the mesh
+    double eps1, double eps2, // Permittivity of each phase
+    const Array<int>& p1, const Array<int>& p2); // list of regions for each phase
 
 // Phi Boundary Condition
-static Vector e_uniform_(0);
 double phi_bc_uniform(const Vector &);
-
-// Prints the program's logo to the given output stream
-void display_banner(ostream & os);
 
 int main(int argc, char *argv[])
 {
    MPI_Session mpi(argc, argv);
+
+
+   // problem constants and attribute and bdr attribute lists corresponding
+   // to different regions and boundaries of the problem
+   // NOTE: the list containing model tags are model dependent
+   double kappa = 2.; // relative permittivity of phase 2 wrt vacuum
+   int num_substrate = 1; // number of regions in the substrate phase (1)
+   int num_inclusion = 1; // number of regions in the inclusion phase (2)
+   int substrate_regions[1] = {186};
+   int inclusion_regions[1] = {92};
+   double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
+   double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
+
 
 
    // Parse command-line options.
@@ -44,43 +38,23 @@ int main(int argc, char *argv[])
    bool visit = true;
 
    Array<int> dbcs;
-   Array<int> nbcs;
+   Array<int> phase1; // list of model regions containing the phase 1 dielectric
+   Array<int> phase2; // list of model regions containing the phase 2 dielectric
 
-   Vector dbcv;
-   Vector nbcv;
-
-   bool dbcg = false;
 
    OptionsParser args(argc, argv);
    args.AddOption(&mesh_file, "-m", "--mesh",
                   "Mesh file to use.");
    args.AddOption(&order, "-o", "--order",
                   "Finite element order (polynomial degree).");
-   args.AddOption(&e_uniform_, "-uebc", "--uniform-e-bc",
-                  "Specify if the three components of the constant "
-                  "electric field");
-   args.AddOption(&pw_eps_, "-pwe", "--piecewise-eps",
-                  "Piecewise values of Permittivity");
-   args.AddOption(&ds_params_, "-ds", "--dielectric-sphere-params",
-                  "Center, Radius, and Permittivity of Dielectric Sphere");
-   args.AddOption(&cs_params_, "-cs", "--charged-sphere-params",
-                  "Center, Radius, and Total Charge of Charged Sphere");
-   args.AddOption(&pc_params_, "-pc", "--point-charge-params",
-                  "Charges and locations of Point Charges");
-   args.AddOption(&vp_params_, "-vp", "--voltaic-pile-params",
-                  "Axis End Points, Radius, and "
-                  "Polarization of Cylindrical Voltaic Pile");
+   args.AddOption(&phase1, "-s", "--substrate",
+                  "List of Model Regions Containing Phase 1 (Substrate).");
+   args.AddOption(&phase2, "-i", "--inclusion",
+                  "List of Model Regions Containing Phase 2 (Inclusion).");
+   args.AddOption(&kappa, "-k", "--kappa",
+                  "Relative permittivity phase 2.");
    args.AddOption(&dbcs, "-dbcs", "--dirichlet-bc-surf",
                   "Dirichlet Boundary Condition Surfaces");
-   args.AddOption(&dbcv, "-dbcv", "--dirichlet-bc-vals",
-                  "Dirichlet Boundary Condition Values");
-   args.AddOption(&dbcg, "-dbcg", "--dirichlet-bc-gradient",
-                  "-no-dbcg", "--no-dirichlet-bc-gradient",
-                  "Dirichlet Boundary Condition Gradient (phi = -z)");
-   args.AddOption(&nbcs, "-nbcs", "--neumann-bc-surf",
-                  "Neumann Boundary Condition Surfaces");
-   args.AddOption(&nbcv, "-nbcv", "--neumann-bc-vals",
-                  "Neumann Boundary Condition Values");
    args.AddOption(&maxit, "-maxit", "--max-amr-iterations",
                   "Max number of iterations in the main AMR loop.");
    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
@@ -113,6 +87,20 @@ int main(int argc, char *argv[])
       cout << "Starting initialization." << endl;
    }
 
+   if (mpi.Root())
+   {
+     printf("max bdr attribute value is %d\n", mesh->bdr_attributes.Max());
+     printf("max volum attribute value is %d\n", mesh->attributes.Max());
+   }
+
+   /* for (int i = 0; i < mesh->GetNE(); i++) */
+   /* { */
+   /*   int attr = mesh->GetAttribute(i); */
+   /*   if (mpi.Root()) */
+   /*     printf("classification of tet %d is %d\n", i, attr); */
+   /* } */
+
+
 
    // Define a parallel mesh by a partitioning of the serial mesh. Refine
    // this mesh further in parallel to increase the resolution. Once the
@@ -123,38 +111,20 @@ int main(int argc, char *argv[])
    // Make sure tet-only meshes are marked for local refinement.
    pmesh.Finalize(true);
 
-   // If the gradient bc was selected but the E field was not specified
-   // set a default vector value.
-   if ( dbcg && e_uniform_.Size() != sdim )
-   {
-      e_uniform_.SetSize(sdim);
-      e_uniform_ = 0.0;
-      e_uniform_(sdim-1) = 1.0;
-   }
-
-   // If values for Dirichlet BCs were not set assume they are zero
-   if ( dbcv.Size() < dbcs.Size() && !dbcg )
-   {
-      dbcv.SetSize(dbcs.Size());
-      dbcv = 0.0;
-   }
-
-   // If values for Neumann BCs were not set assume they are zero
-   if ( nbcv.Size() < nbcs.Size() )
-   {
-      nbcv.SetSize(nbcs.Size());
-      nbcv = 0.0;
-   }
 
    // Create a coefficient describing the dielectric permittivity
-   Coefficient * epsCoef = SetupPermittivityCoefficient();
+   Coefficient * epsCoef =
+     SetupPermittivityCoefficient(pmesh.attributes.Max(),
+     	 epsilon1, epsilon2, phase1, phase2);
+
+   // Boundary Conditions
+   // Boundary conditions in this example are all around Dirichlet of the form
+   // phi = -E.x, where E is a constant vector. This type of boundary conditions
+   // mimics a uniform background electric field. Thus boundary conditions are
+   // provided by the function phi_bc_uniform(x).
 
    // Create the Electrostatic solver
-   InclusionSolver Volta(pmesh, order, dbcs, dbcv, nbcs, nbcv, *epsCoef,
-                     ( e_uniform_.Size() > 0 ) ? phi_bc_uniform    : NULL,
-                     ( cs_params_.Size() > 0 ) ? charged_sphere    : NULL,
-                     ( vp_params_.Size() > 0 ) ? voltaic_pile      : NULL,
-                     pc_params_);
+   InclusionSolver Volta(pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
 
    // Initialize GLVis visualization
    if (visualization)
@@ -278,122 +248,18 @@ int main(int argc, char *argv[])
 // The Permittivity is a required coefficient which may be defined in
 // various ways so we'll determine the appropriate coefficient type here.
 Coefficient *
-SetupPermittivityCoefficient()
+SetupPermittivityCoefficient(int max_attr, // max attribute in the mesh
+    double eps1, double eps2, // Permittivity of each phase
+    const Array<int>& p1, const Array<int>& p2) // list of regions for each phase
 {
-   Coefficient * coef = NULL;
-
-   if ( ds_params_.Size() > 0 )
-   {
-      coef = new FunctionCoefficient(dielectric_sphere);
-   }
-   else if ( pw_eps_.Size() > 0 )
-   {
-      coef = new PWConstCoefficient(pw_eps_);
-   }
-   else
-   {
-      coef = new ConstantCoefficient(epsilon0_);
-   }
-
+   Vector epsilons(max_attr);
+   epsilons = 0.0;
+   for (int i=0; i<p1.Size(); i++)
+     epsilons[p1[i]-1] = eps1;
+   for (int i=0; i<p2.Size(); i++)
+     epsilons[p2[i]-1] = eps2;
+   Coefficient * coef = new PWConstCoefficient(epsilons);
    return coef;
-}
-
-// A sphere with constant permittivity.  The sphere has a radius,
-// center, and permittivity specified on the command line and stored
-// in ds_params_.
-double dielectric_sphere(const Vector &x)
-{
-   double r2 = 0.0;
-
-   for (int i=0; i<x.Size(); i++)
-   {
-      r2 += (x(i)-ds_params_(i))*(x(i)-ds_params_(i));
-   }
-
-   if ( sqrt(r2) <= ds_params_(x.Size()) )
-   {
-      return ds_params_(x.Size()+1) * epsilon0_;
-   }
-   return epsilon0_;
-}
-
-// A sphere with constant charge density.  The sphere has a radius,
-// center, and total charge specified on the command line and stored
-// in cs_params_.
-double charged_sphere(const Vector &x)
-{
-   double r2 = 0.0;
-   double rho = 0.0;
-
-   if ( cs_params_(x.Size()) > 0.0 )
-   {
-      switch ( x.Size() )
-      {
-         case 2:
-            rho = cs_params_(x.Size()+1) /
-                  (M_PI * pow(cs_params_(x.Size()), 2));
-            break;
-         case 3:
-            rho = 0.75 * cs_params_(x.Size()+1) /
-                  (M_PI * pow(cs_params_(x.Size()), 3));
-            break;
-         default:
-            rho = 0.0;
-      }
-   }
-
-   for (int i=0; i<x.Size(); i++)
-   {
-      r2 += (x(i) - cs_params_(i)) * (x(i) - cs_params_(i));
-   }
-
-   if ( sqrt(r2) <= cs_params_(x.Size()) )
-   {
-      return rho;
-   }
-   return 0.0;
-}
-
-// A Cylindrical Rod of constant polarization.  The cylinder has two
-// axis end points, a radius, and a constant electric polarization oriented
-// along the axis.
-void voltaic_pile(const Vector &x, Vector &p)
-{
-   p.SetSize(x.Size());
-   p = 0.0;
-
-   Vector  a(x.Size());  // Normalized Axis vector
-   Vector xu(x.Size());  // x vector relative to the axis end-point
-
-   xu = x;
-
-   for (int i=0; i<x.Size(); i++)
-   {
-      xu[i] -= vp_params_[i];
-      a[i]   = vp_params_[x.Size()+i] - vp_params_[i];
-   }
-
-   double h = a.Norml2();
-
-   if ( h == 0.0 )
-   {
-      return;
-   }
-
-   double  r = vp_params_[2 * x.Size()];
-   double xa = xu * a;
-
-   if ( h > 0.0 )
-   {
-      xu.Add(-xa / (h * h), a);
-   }
-
-   double xp = xu.Norml2();
-
-   if ( xa >= 0.0 && xa <= h*h && xp <= r )
-   {
-      p.Add(vp_params_[2 * x.Size() + 1] / h, a);
-   }
 }
 
 // To produce a uniform electric field the potential can be set
@@ -401,10 +267,14 @@ void voltaic_pile(const Vector &x, Vector &p)
 double phi_bc_uniform(const Vector &x)
 {
    double phi = 0.0;
+   Vector euniform(3);
+   euniform[0] = 0.;
+   euniform[1] = 0.;
+   euniform[2] = 10.;
 
    for (int i=0; i<x.Size(); i++)
    {
-      phi -= x(i) * e_uniform_(i);
+      phi -= x(i) * euniform(i);
    }
 
    return phi;
