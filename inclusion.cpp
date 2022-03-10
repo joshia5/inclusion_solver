@@ -27,13 +27,14 @@ int main(int argc, char *argv[])
    int inclusion_regions[1] = {92};
    double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
    double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
+   bool isAmr = true;
 
 
 
    // Parse command-line options.
    const char *mesh_file = "";
    int order = 1;
-   int maxit = 100;
+   int maxit = 20;
    bool visualization = true;
    bool visit = true;
 
@@ -87,20 +88,6 @@ int main(int argc, char *argv[])
       cout << "Starting initialization." << endl;
    }
 
-   if (mpi.Root())
-   {
-     printf("max bdr attribute value is %d\n", mesh->bdr_attributes.Max());
-     printf("max volum attribute value is %d\n", mesh->attributes.Max());
-   }
-
-   /* for (int i = 0; i < mesh->GetNE(); i++) */
-   /* { */
-   /*   int attr = mesh->GetAttribute(i); */
-   /*   if (mpi.Root()) */
-   /*     printf("classification of tet %d is %d\n", i, attr); */
-   /* } */
-
-
 
    // Define a parallel mesh by a partitioning of the serial mesh. Refine
    // this mesh further in parallel to increase the resolution. Once the
@@ -124,20 +111,21 @@ int main(int argc, char *argv[])
    // provided by the function phi_bc_uniform(x).
 
    // Create the Electrostatic solver
-   InclusionSolver Volta(pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
+   InclusionSolver Inclusion(pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
+
 
    // Initialize GLVis visualization
    if (visualization)
    {
-      Volta.InitializeGLVis();
+      Inclusion.InitializeGLVis();
    }
 
    // Initialize VisIt visualization
-   VisItDataCollection visit_dc("Volta-AMR-Parallel", &pmesh);
+   VisItDataCollection visit_dc("Inclusion-AMR-Parallel", &pmesh);
 
    if ( visit )
    {
-      Volta.RegisterVisItFields(visit_dc);
+      Inclusion.RegisterVisItFields(visit_dc);
    }
    if (mpi.Root()) { cout << "Initialization done." << endl; }
 
@@ -155,27 +143,30 @@ int main(int argc, char *argv[])
       }
 
       // Display the current number of DoFs in each finite element space
-      Volta.PrintSizes();
+      Inclusion.PrintSizes();
 
       // Assemble all forms
-      Volta.Assemble();
+      Inclusion.Assemble();
 
       // Solve the system and compute any auxiliary fields
-      Volta.Solve();
+      Inclusion.Solve();
 
+      stringstream ss;
+      ss << "inclusion_iter_" << it << ".vtk";
+      Inclusion.WriteToVtk(ss.str().c_str());
       // Determine the current size of the linear system
-      int prob_size = Volta.GetProblemSize();
+      int prob_size = Inclusion.GetProblemSize();
 
       // Write fields to disk for VisIt
       if ( visit )
       {
-         Volta.WriteVisItFields(it);
+         Inclusion.WriteVisItFields(it);
       }
 
       // Send the solution by socket to a GLVis server.
       if (visualization)
       {
-         Volta.DisplayToGLVis();
+         Inclusion.DisplayToGLVis();
       }
 
       if (mpi.Root())
@@ -211,24 +202,27 @@ int main(int argc, char *argv[])
          break;
       }
 
-      // Estimate element errors using the Zienkiewicz-Zhu error estimator.
-      Vector errors(pmesh.GetNE());
-      Volta.GetErrorEstimates(errors);
+      if (isAmr)
+      {
+	// Estimate element errors using the Zienkiewicz-Zhu error estimator.
+	Vector errors(pmesh.GetNE());
+	Inclusion.GetErrorEstimates(errors);
 
-      double local_max_err = errors.Max();
-      double global_max_err;
-      MPI_Allreduce(&local_max_err, &global_max_err, 1,
-                    MPI_DOUBLE, MPI_MAX, pmesh.GetComm());
+	double local_max_err = errors.Max();
+	double global_max_err;
+	MPI_Allreduce(&local_max_err, &global_max_err, 1,
+		      MPI_DOUBLE, MPI_MAX, pmesh.GetComm());
 
-      // Refine the elements whose error is larger than a fraction of the
-      // maximum element error.
-      const double frac = 0.7;
-      double threshold = frac * global_max_err;
-      if (mpi.Root()) { cout << "Refining ..." << endl; }
-      pmesh.RefineByError(errors, threshold);
+	// Refine the elements whose error is larger than a fraction of the
+	// maximum element error.
+	const double frac = 0.7;
+	double threshold = frac * global_max_err;
+	if (mpi.Root()) { cout << "Refining ..." << endl; }
+	pmesh.RefineByError(errors, threshold);
+      }
 
       // Update the electrostatic solver to reflect the new state of the mesh.
-      Volta.Update();
+      Inclusion.Update();
 
       if (pmesh.Nonconforming() && mpi.WorldSize() > 1)
       {
@@ -236,7 +230,7 @@ int main(int argc, char *argv[])
          pmesh.Rebalance();
 
          // Update again after rebalancing
-         Volta.Update();
+         Inclusion.Update();
       }
    }
 
@@ -270,7 +264,7 @@ double phi_bc_uniform(const Vector &x)
    Vector euniform(3);
    euniform[0] = 0.;
    euniform[1] = 0.;
-   euniform[2] = 10.;
+   euniform[2] = 1.;
 
    for (int i=0; i<x.Size(); i++)
    {
