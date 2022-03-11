@@ -1,5 +1,6 @@
 
 #include "inclusion_solver.hpp"
+#include "mfem.hpp"
 #include <fstream>
 #include <iostream>
 
@@ -14,6 +15,76 @@
 
 namespace oh = Omega_h;
 
+namespace { // anonymous namespace
+
+/* parts of this function is derived from the file
+ * ugawg_linear.cpp of omega_h source code
+ */
+template <oh::Int dim>
+static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
+  *pOmesh) {
+  auto coords = mesh->coords();
+  auto target_metrics_w = oh::Write<oh::Real>
+    (mesh->nverts() * oh::symm_ncomps(dim));
+  pOmesh->ProjectFieldElementtoVertex (mesh, "zz_error");
+  auto zz_error = mesh->get_array<oh::Real> (0, "zz_error");
+  /*
+  auto f = OMEGA_H_LAMBDA(oh::LO v) {
+    auto x = coords[v*dim];
+    auto y = coords[v*dim + 1];
+    auto z = coords[v*dim + 2];
+    auto h = oh::Vector<dim>();
+    auto vtxError = zz_error[v];
+    for (oh::Int i = 0; i < dim; ++i)
+      h[i] = 0.004/std::pow(std::abs(vtxError), 0.6);
+      //h[i] = 0.001/std::pow(std::abs(vtxError), 0.6);//1k, 0.33mil
+    auto m = diagonal(metric_eigenvalues_from_lengths(h));
+    set_symm(target_metrics_w, v, m);
+  };
+  oh::parallel_for(mesh->nverts(), f);
+  */
+  mesh->set_tag(oh::VERT, "target_metric", oh::Reals(target_metrics_w));
+}
+
+/* parts of this function is derived from the file
+ * ugawg_linear.cpp of omega_h source code
+ */
+template <oh::Int dim>
+void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
+              const oh::Int myid, ParOmegaMesh *pOmesh) {
+  auto world = mesh->comm();
+  mesh->set_parting(OMEGA_H_GHOSTED);
+  auto implied_metrics = get_implied_metrics(mesh);
+  mesh->add_tag(oh::VERT, "metric", oh::symm_ncomps(dim), implied_metrics);
+  mesh->add_tag<oh::Real>(oh::VERT, "target_metric", oh::symm_ncomps(dim));
+  set_target_metric<dim>(mesh, scale, pOmesh);
+  mesh->set_parting(OMEGA_H_ELEM_BASED);
+  mesh->ask_lengths();
+  mesh->ask_qualities();
+  oh::vtk::FullWriter writer;
+  if (vtk_path) {
+    writer = oh::vtk::FullWriter(vtk_path, mesh);
+    writer.write();
+  }
+  auto opts = oh::AdaptOpts(mesh);
+  opts.verbosity = oh::EXTRA_STATS;
+  opts.length_histogram_max = 2.0;
+  opts.max_length_allowed = opts.max_length_desired * 4.0;
+  opts.min_quality_allowed = 0.00001;
+  opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
+  oh::Now t0 = oh::now();
+  while (approach_metric(mesh, opts)) {
+    adapt(mesh, opts);
+    if (mesh->has_tag(oh::VERT, "target_metric")) set_target_metric<dim>(mesh,
+                      scale, pOmesh);
+    if (vtk_path) writer.write();
+  }
+  oh::Now t1 = oh::now();
+  if (!myid) std::cout << "total time: " << (t1 - t0) << " seconds\n";
+}
+
+} // end anonymous namespace
+
 // Permittivity Functions
 Coefficient *
 SetupPermittivityCoefficient(int max_attr, // max attribute in the mesh
@@ -26,6 +97,8 @@ double phi_bc_uniform(const Vector &);
 int main(int argc, char *argv[])
 {
    MPI_Session mpi(argc, argv);
+   int myid;
+   MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
   // Read Omega_h mesh
      auto lib = oh::Library();
@@ -34,6 +107,9 @@ int main(int argc, char *argv[])
    oh::binary::read ("/lore/joshia5/Meshes/oh-mfem/inclusion_1x1_12k_4p.osh",
                     lib.world(), &o_mesh);
 
+  //number of adaptation iterations
+  int max_iter = 1;
+  for (int Itr = 0; Itr < max_iter; Itr++)  {
 
    // problem constants and attribute and bdr attribute lists corresponding
    // to different regions and boundaries of the problem
@@ -45,7 +121,7 @@ int main(int argc, char *argv[])
    int inclusion_regions[1] = {92};
    double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
    double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
-   bool isAmr = true;
+   bool isAmr = false;
 
 
 
@@ -98,8 +174,10 @@ int main(int argc, char *argv[])
    // Read the (serial) mesh from the given mesh file on all processors.  We
    // can handle triangular, quadrilateral, tetrahedral, hexahedral, surface
    // and volume meshes with the same code.
-   Mesh *mesh = new Mesh(mesh_file, 1, 1);
-   int sdim = mesh->SpaceDimension();
+   //Mesh *mesh = new Mesh(mesh_file, 1, 1);
+   ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
+
+   int sdim = pmesh->SpaceDimension();
 
    if (mpi.Root())
    {
@@ -110,16 +188,16 @@ int main(int argc, char *argv[])
    // Define a parallel mesh by a partitioning of the serial mesh. Refine
    // this mesh further in parallel to increase the resolution. Once the
    // parallel mesh is defined, the serial mesh can be deleted.
-   ParMesh pmesh(MPI_COMM_WORLD, *mesh);
-   delete mesh;
+   //ParMesh pmesh(MPI_COMM_WORLD, *mesh);
+   //delete mesh;
 
    // Make sure tet-only meshes are marked for local refinement.
-   pmesh.Finalize(true);
+   //pmesh.Finalize(true);
 
 
    // Create a coefficient describing the dielectric permittivity
    Coefficient * epsCoef =
-     SetupPermittivityCoefficient(pmesh.attributes.Max(),
+     SetupPermittivityCoefficient(pmesh->attributes.Max(),
      	 epsilon1, epsilon2, phase1, phase2);
 
    // Boundary Conditions
@@ -129,7 +207,7 @@ int main(int argc, char *argv[])
    // provided by the function phi_bc_uniform(x).
 
    // Create the Electrostatic solver
-   InclusionSolver Inclusion(pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
+   InclusionSolver Inclusion(*pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
 
 
    // Initialize GLVis visualization
@@ -139,7 +217,7 @@ int main(int argc, char *argv[])
    }
 
    // Initialize VisIt visualization
-   VisItDataCollection visit_dc("Inclusion-AMR-Parallel", &pmesh);
+   VisItDataCollection visit_dc("Inclusion-AMR-Parallel", pmesh);
 
    if ( visit )
    {
@@ -223,29 +301,29 @@ int main(int argc, char *argv[])
       if (isAmr)
       {
 	// Estimate element errors using the Zienkiewicz-Zhu error estimator.
-	Vector errors(pmesh.GetNE());
+	Vector errors(pmesh->GetNE());
 	Inclusion.GetErrorEstimates(errors);
 
 	double local_max_err = errors.Max();
 	double global_max_err;
 	MPI_Allreduce(&local_max_err, &global_max_err, 1,
-		      MPI_DOUBLE, MPI_MAX, pmesh.GetComm());
+		      MPI_DOUBLE, MPI_MAX, pmesh->GetComm());
 
 	// Refine the elements whose error is larger than a fraction of the
 	// maximum element error.
 	const double frac = 0.7;
 	double threshold = frac * global_max_err;
 	if (mpi.Root()) { cout << "Refining ..." << endl; }
-	pmesh.RefineByError(errors, threshold);
+	pmesh->RefineByError(errors, threshold);
       }
 
       // Update the electrostatic solver to reflect the new state of the mesh.
       Inclusion.Update();
 
-      if (pmesh.Nonconforming() && mpi.WorldSize() > 1)
+      if (pmesh->Nonconforming() && mpi.WorldSize() > 1)
       {
          if (mpi.Root()) { cout << "Rebalancing ..." << endl; }
-         pmesh.Rebalance();
+         pmesh->Rebalance();
 
          // Update again after rebalancing
          Inclusion.Update();
@@ -253,6 +331,7 @@ int main(int argc, char *argv[])
    }
 
    delete epsCoef;
+  } // end iterative adaptation loop
 
    return 0;
 }
