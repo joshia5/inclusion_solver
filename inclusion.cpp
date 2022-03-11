@@ -28,7 +28,6 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
     (mesh->nverts() * oh::symm_ncomps(dim));
   pOmesh->ProjectFieldElementtoVertex (mesh, "zz_error");
   auto zz_error = mesh->get_array<oh::Real> (0, "zz_error");
-  /*
   auto f = OMEGA_H_LAMBDA(oh::LO v) {
     auto x = coords[v*dim];
     auto y = coords[v*dim + 1];
@@ -42,7 +41,6 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
     set_symm(target_metrics_w, v, m);
   };
   oh::parallel_for(mesh->nverts(), f);
-  */
   mesh->set_tag(oh::VERT, "target_metric", oh::Reals(target_metrics_w));
 }
 
