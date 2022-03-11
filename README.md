@@ -1,6 +1,6 @@
 ## Summary
 
-This application (based on MFEM's Volta miniapp), solve the electrostatic problem for a substrate the includes an array of ellipsoidal inclusions with a different permittivity. The boundary conditions for this problem are consistent with a uniform background Electric field in the z direction of the coordinate axes.
+This application (based on MFEM's Volta miniapp), solves the electrostatic problem for a substrate that includes an array of ellipsoidal inclusions with a different permittivity. The boundary conditions for this problem are consistent with a uniform background Electric field in the z direction of the coordinate axes.
 
 ## Build Instructions
 
@@ -12,9 +12,9 @@ This application (based on MFEM's Volta miniapp), solve the electrostatic proble
 
 If things run successfully there should be an executable named `inclusion` in your build folder.
 
-**Note** for SCOREC users. All the necessary module to build can be loaded by calling `source ../env-setup-scorec.sh`, and `scorec_config.sh` config file is customized for SCOREC.
+**Note** for SCOREC users. All the necessary modules to build this example can be loaded by calling `source ../env-setup-scorec.sh`, and `scorec_config.sh` config file is customized for SCOREC.
 
-**Note** both the build for this example and the build of MFEM have to used consistent dependencies (e.g. the same Hypre, Metis, etc) to avoid build problems.
+**Note** both the build for this example and the build of MFEM have to use consistent dependencies (e.g. the same Hypre, Metis, etc) to avoid build problems.
 
 ## Example Meshes
 
