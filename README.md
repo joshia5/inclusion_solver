@@ -40,5 +40,5 @@ mpirun -np 4 ./inclusion --mesh ../meshes/setup_1x1_global_coarse_template_mesh.
 ```
 
 ```
-mpirun -np 4 ./inclusion --mesh ../meshes/setup_5x5_global_coarse_template_mesh.mesh --substrate '92' --inclusion '2590 2435 4321 2282 714 2757 875 2918 3861 1823 4494 3711 4184 2145 4031 1992 1366 3409 1527 3570 1060 3103 1221 3264 1696' -dbcs '24 42 76 78 80 82'
+mpirun -np 4 ./inclusion --mesh ../meshes/setup_5x5_global_coarse_template_mesh.mesh --substrate '92' --inclusion '2590 2435 4321 2282 714 2757 875 2918 3862 1823 4494 3711 4184 2145 4031 1992 1366 3409 1527 3570 1060 3103 1221 3264 1696' -dbcs '24 42 76 78 80 82'
 ```
