@@ -1,4 +1,4 @@
-#This file shows how to link to a MFEM (and PUMI)
+#This file shows how to link to a MFEM (and PUMI) build
 #installation using CMake
 #it represents a simple 'CMakeLists.txt'
 #file for a new project
@@ -7,23 +7,13 @@ cmake_minimum_required(VERSION 3.0.0)
 
 project(inclusion_solver VERSION 1.0.0 LANGUAGES CXX)
 
-# set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/config/cmake/modules)
-# include(MfemCmakeUtilities)
-
-# Starting here are the critical lines:
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/bob.cmake")
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MfemCmakeUtilities.cmake")
-
-bob_begin_package()
-
-
 
 # Let CMake know where to find custom FindFoo.cmake files
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
-find_package(HYPRE REQUIRED) 
-find_package(METIS REQUIRED) 
+find_package(HYPRE REQUIRED)
+find_package(METIS REQUIRED)
 
 
 if (MFEM_PREFIX)
@@ -55,5 +45,3 @@ target_link_libraries(inclusion
   ${HYPRE_LIBRARIES}
   ${METIS_LIBRARIES}
   inclusion_solver)
-
-bob_end_package()

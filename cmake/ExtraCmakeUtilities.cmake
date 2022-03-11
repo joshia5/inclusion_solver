@@ -1,5 +1,4 @@
-# Auxiliary function, used in mfem_find_package().
-function(mfem_find_component Prefix DirVar IncSuffixes Header LibSuffixes Lib
+function(extra_find_component Prefix DirVar IncSuffixes Header LibSuffixes Lib
          IncDoc LibDoc)
 
   if (Lib)
@@ -28,26 +27,10 @@ function(mfem_find_component Prefix DirVar IncSuffixes Header LibSuffixes Lib
       DOC "${IncDoc}")
   endif()
 
-endfunction(mfem_find_component)
+endfunction(extra_find_component)
 
 
-#   MFEM version of find_package that searches for header/library and if
-#   successful, optionally checks building (compile + link) one or more given
-#   code snippets. Additionally, a list of required/optional/alternative
-#   packages (given by ${Name}_REQUIRED_PACKAGES) are searched for and added to
-#   the ${Prefix}_INCLUDE_DIRS and ${Prefix}_LIBRARIES lists. The variable
-#   ${Name}_REQUIRED_LIBRARIES can be set to specify any additional libraries
-#   that are needed. This function defines the following CACHE variables:
-#
-#      ${Prefix}_FOUND
-#      ${Prefix}_INCLUDE_DIRS
-#      ${Prefix}_LIBRARIES
-#
-#   If ${Name}_SKIP_LOOKING_MSG is true, skip the initial "Looking ..." message.
-#
-#   This function is intended to be called from the script Find${Name}.cmake
-#
-function(mfem_find_package Name Prefix DirVar IncSuffixes Header LibSuffixes
+function(extra_find_package Name Prefix DirVar IncSuffixes Header LibSuffixes
          Lib IncDoc LibDoc)
 
   # If we have the TPL_ versions of _INCLUDE_DIRS and _LIBRARIES then set the
@@ -84,7 +67,7 @@ function(mfem_find_package Name Prefix DirVar IncSuffixes Header LibSuffixes
     endif()
   endif()
 
-  mfem_find_component("${Prefix}" "${DirVar}" "${IncSuffixes}" "${Header}"
+  extra_find_component("${Prefix}" "${DirVar}" "${IncSuffixes}" "${Header}"
     "${LibSuffixes}" "${Lib}" "${IncDoc}" "${LibDoc}")
 
   if (((NOT Lib) OR ${Prefix}_LIBRARY) AND
@@ -128,7 +111,7 @@ function(mfem_find_package Name Prefix DirVar IncSuffixes Header LibSuffixes
       set(CompRequired ${${Name}_FIND_REQUIRED_${CompPrefix}})
       if (CompRequested)
         set(FullPrefix "${Prefix}_${CompPrefix}")
-        mfem_find_component("${FullPrefix}" "${DirVar}"
+        extra_find_component("${FullPrefix}" "${DirVar}"
           "${CompIncSuffixes}" "${CompHeader}"
           "${CompLibSuffixes}" "${CompLib}" "" "")
         if (CompRequired)
@@ -440,4 +423,4 @@ function(mfem_find_package Name Prefix DirVar IncSuffixes Header LibSuffixes
     endif()
   endif()
 
-endfunction(mfem_find_package)
+endfunction(extra_find_package)

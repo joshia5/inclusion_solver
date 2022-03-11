@@ -1,21 +1,3 @@
-# Copyright (c) 2010-2022, Lawrence Livermore National Security, LLC. Produced
-# at the Lawrence Livermore National Laboratory. All Rights reserved. See files
-# LICENSE and NOTICE for details. LLNL-CODE-806117.
-#
-# This file is part of the MFEM library. For more information and source code
-# availability visit https://mfem.org.
-#
-# MFEM is free software; you can redistribute it and/or modify it under the
-# terms of the BSD-3 license. We welcome feedback and contributions, see file
-# CONTRIBUTING.md for details.
-
-# Defines the following variables:
-#   - HYPRE_FOUND
-#   - HYPRE_LIBRARIES
-#   - HYPRE_INCLUDE_DIRS
-#   - HYPRE_VERSION
-#   - HYPRE_USING_HIP (internal)
-
 if (HYPRE_FOUND)
   if (HYPRE_USING_HIP)
     find_package(rocsparse REQUIRED)
@@ -24,8 +6,8 @@ if (HYPRE_FOUND)
   return()
 endif()
 
-include(MfemCmakeUtilities)
-mfem_find_package(HYPRE HYPRE HYPRE_DIR "include" "HYPRE.h" "lib" "HYPRE"
+include(ExtraCmakeUtilities)
+extra_find_package(HYPRE HYPRE HYPRE_DIR "include" "HYPRE.h" "lib" "HYPRE"
   "Paths to headers required by HYPRE." "Libraries required by HYPRE."
   CHECK_BUILD HYPRE_USING_HIP FALSE
   "
