@@ -1,8 +1,8 @@
-export MFEM_INSTALL_PATH=/home/morteza/Sandbox/install/mfem
-export HYPRE_DIR=/home/morteza/Sandbox/install/hypre
-export METIS_DIR=/home/morteza/Sandbox/install/metis
+export MFEM_INSTALL_PATH=path/to/mfem/install
+export HYPRE_DIR=path/to/hypre/install
+export METIS_DIR=path/to/metis/install
 flags="-g -O0"
-cmake /home/morteza/Sandbox/inclusion_solver \
+cmake .. \
   -DCMAKE_BUILD_TYPE=Debug \
   -DMFEM_PREFIX=$MFEM_INSTALL_PATH \
   -DCMAKE_VERBOSE_MAKEFILE:BOOL=OFF \
