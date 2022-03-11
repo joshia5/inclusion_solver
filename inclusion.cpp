@@ -152,7 +152,7 @@ int main(int argc, char *argv[])
       Inclusion.Solve();
 
       stringstream ss;
-      ss << "inclusion_iter_" << it << ".vtk";
+      ss << "inclusion_iter_" << it;
       Inclusion.WriteToVtk(ss.str().c_str());
       // Determine the current size of the linear system
       int prob_size = Inclusion.GetProblemSize();

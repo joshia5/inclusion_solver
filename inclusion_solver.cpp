@@ -457,8 +457,10 @@ InclusionSolver::DisplayToGLVis()
 void
 InclusionSolver::WriteToVtk(const char* name, int res)
 {
+   char filename[128];
+   sprintf(filename, "%s_proc%05d.vtk", name, myid_);
    ofstream ofs;
-   ofs.open(name, ofstream::out);
+   ofs.open(filename, ofstream::out);
    pmesh_->PrintVTK(ofs, res);
    phi_->SaveVTK(ofs, "potential", res);
    e_->SaveVTK(ofs, "ElectricField", res);
