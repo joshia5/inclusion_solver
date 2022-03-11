@@ -7,11 +7,12 @@ cmake_minimum_required(VERSION 3.0.0)
 
 project(inclusion_solver VERSION 1.0.0 LANGUAGES CXX)
 
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/config/cmake/modules)
-include(MfemCmakeUtilities)
+# set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/config/cmake/modules)
+# include(MfemCmakeUtilities)
 
 # Starting here are the critical lines:
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/bob.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/MfemCmakeUtilities.cmake")
 
 bob_begin_package()
 
