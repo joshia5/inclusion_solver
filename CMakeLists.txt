@@ -12,10 +12,14 @@ project(inclusion_solver VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
-find_package(Omega_h REQUIRED)
+if(USE_OMEGAH)
+  find_package(Omega_h REQUIRED)
+endif()
 if(NOT MFEM_USE_CUDA)
   #HACK: Clear the omegah compilation flags that it passes to cuda.
-  set_property(TARGET Omega_h::omega_h PROPERTY INTERFACE_COMPILE_OPTIONS "")
+  if(USE_OMEGAH)
+    set_property(TARGET Omega_h::omega_h PROPERTY INTERFACE_COMPILE_OPTIONS "")
+  endif()
 endif()
 
 if(MFEM_USE_CUDA)
