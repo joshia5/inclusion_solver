@@ -12,9 +12,19 @@ project(inclusion_solver VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
-find_package(HYPRE REQUIRED)
-find_package(METIS REQUIRED)
+find_package(Omega_h REQUIRED)
+if(NOT MFEM_USE_CUDA)
+  #HACK: Clear the omegah compilation flags that it passes to cuda.
+  set_property(TARGET Omega_h::omega_h PROPERTY INTERFACE_COMPILE_OPTIONS "")
+endif()
 
+if(MFEM_USE_CUDA)
+  if(NOT OMEGA_H_USE_CUDA)
+    #TODO we may want to support mfem+cuda and omegah without cuda at some
+    # point... possibly for debugging
+    message(FATAL_ERROR "MFEM has CUDA enabled but Omega_h does not...exiting")
+  endif()
+endif()
 
 if (MFEM_PREFIX)
 find_package(MFEM REQUIRED CONFIG PATHS ${MFEM_PREFIX} NO_DEFAULT_PATH)
@@ -28,20 +38,24 @@ find_package(
     )
 endif()
 
+
 message(STATUS "MFEM INCLUDE is ${MFEM_INCLUDE_DIRS} ")
 message(STATUS "MFEM LIBRARY is ${MFEM_LIBRARY_DIR} ")
 
 
-add_library(inclusion_solver STATIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/inclusion_solver.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/pfem_extras.cpp)
-include_directories(${MFEM_INCLUDE_DIRS})
-target_link_libraries(inclusion_solver ${MFEM_LIBRARY_DIR}/libmfem.a)
+add_library(inclusion_solver STATIC inclusion_solver.cpp pfem_extras.cpp)
+target_link_libraries(inclusion_solver mfem)
+if(MFEM_USE_CUDA)
+  enable_language(CUDA)
+  set_source_files_properties(inclusion_solver.cpp pfem_extras.cpp PROPERTIES LANGUAGE CUDA)
+  set_property(TARGET inclusion_solver PROPERTY CUDA_ARCHITECTURES ${INCLUSION_SOLVER_CUDA_ARCH})
+endif()
 
-add_executable(inclusion ${CMAKE_CURRENT_SOURCE_DIR}/inclusion.cpp)
+add_executable(inclusion inclusion.cpp)
 include_directories(${MFEM_INCLUDE_DIRS})
-target_link_libraries(inclusion 
-  ${MFEM_LIBRARY_DIR}/libmfem.a
-  ${HYPRE_LIBRARIES}
-  ${METIS_LIBRARIES}
-  inclusion_solver)
+target_link_libraries(inclusion inclusion_solver)
+if(MFEM_USE_CUDA)
+  set_source_files_properties(inclusion.cpp PROPERTIES LANGUAGE CUDA)
+  set_property(TARGET inclusion PROPERTY CUDA_ARCHITECTURES ${INCLUSION_SOLVER_CUDA_ARCH})
+endif()
+
