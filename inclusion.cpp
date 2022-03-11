@@ -3,6 +3,17 @@
 #include <fstream>
 #include <iostream>
 
+#include <Omega_h_file.hpp>
+#include <Omega_h_library.hpp>
+#include <Omega_h_mesh.hpp>
+
+#include <Omega_h_adapt.hpp>
+#include <Omega_h_for.hpp>
+#include <Omega_h_metric.hpp>
+#include <Omega_h_timer.hpp>
+
+namespace oh = Omega_h;
+
 // Permittivity Functions
 Coefficient *
 SetupPermittivityCoefficient(int max_attr, // max attribute in the mesh
@@ -15,6 +26,13 @@ double phi_bc_uniform(const Vector &);
 int main(int argc, char *argv[])
 {
    MPI_Session mpi(argc, argv);
+
+  // Read Omega_h mesh
+     auto lib = oh::Library();
+       oh::Mesh o_mesh(&lib);
+  //
+   oh::binary::read ("/lore/joshia5/Meshes/oh-mfem/inclusion_1x1_12k_4p.osh",
+                    lib.world(), &o_mesh);
 
 
    // problem constants and attribute and bdr attribute lists corresponding
