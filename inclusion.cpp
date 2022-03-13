@@ -35,7 +35,7 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
     auto h = oh::Vector<dim>();
     auto vtxError = zz_error[v];
     for (oh::Int i = 0; i < dim; ++i)
-      h[i] = 0.004/std::pow(std::abs(vtxError), 0.6);
+      h[i] = 0.00001/std::pow(std::abs(vtxError), 0.5);
       //h[i] = 0.001/std::pow(std::abs(vtxError), 0.6);//1k, 0.33mil
     auto m = diagonal(metric_eigenvalues_from_lengths(h));
     set_symm(target_metrics_w, v, m);
@@ -44,12 +44,10 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
   mesh->set_tag(oh::VERT, "target_metric", oh::Reals(target_metrics_w));
 }
 
-/* parts of this function is derived from the file
- * ugawg_linear.cpp of omega_h source code
- */
 template <oh::Int dim>
 void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
               const oh::Int myid, ParOmegaMesh *pOmesh) {
+  printf("in run case\n");
   auto world = mesh->comm();
   mesh->set_parting(OMEGA_H_GHOSTED);
   auto implied_metrics = get_implied_metrics(mesh);
@@ -68,10 +66,11 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   opts.verbosity = oh::EXTRA_STATS;
   opts.length_histogram_max = 2.0;
   opts.max_length_allowed = opts.max_length_desired * 4.0;
-  opts.min_quality_allowed = 0.00001;
+  //opts.min_quality_allowed = 0.00001;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
   oh::Now t0 = oh::now();
   while (approach_metric(mesh, opts)) {
+    printf("approach metric\n");
     adapt(mesh, opts);
     if (mesh->has_tag(oh::VERT, "target_metric")) set_target_metric<dim>(mesh,
                       scale, pOmesh);
@@ -109,131 +108,132 @@ int main(int argc, char *argv[])
   int max_iter = 1;
   for (int Itr = 0; Itr < max_iter; Itr++)  {
 
-   // problem constants and attribute and bdr attribute lists corresponding
-   // to different regions and boundaries of the problem
-   // NOTE: the list containing model tags are model dependent
-   double kappa = 2.; // relative permittivity of phase 2 wrt vacuum
-   int num_substrate = 1; // number of regions in the substrate phase (1)
-   int num_inclusion = 1; // number of regions in the inclusion phase (2)
-   int substrate_regions[1] = {186};
-   int inclusion_regions[1] = {92};
-   double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
-   double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
-   bool isAmr = false;
+    // problem constants and attribute and bdr attribute lists corresponding
+    // to different regions and boundaries of the problem
+    // NOTE: the list containing model tags are model dependent
+    double kappa = 2.; // relative permittivity of phase 2 wrt vacuum
+    //int num_substrate = 1; // number of regions in the substrate phase (1)
+    //int num_inclusion = 1; // number of regions in the inclusion phase (2)
+    //int substrate_regions[1] = {186};
+    //int inclusion_regions[1] = {92};
+    double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
+    double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
+    bool isAmr = false;
 
 
 
-   // Parse command-line options.
-   const char *mesh_file = "";
-   int order = 1;
-   int maxit = 20;
-   bool visualization = true;
-   bool visit = true;
+    // Parse command-line options.
+    const char *mesh_file = "";
+    int order = 1;
+    int maxit = 1;
+    bool visualization = true;
+    bool visit = true;
 
-   Array<int> dbcs;
-   Array<int> phase1; // list of model regions containing the phase 1 dielectric
-   Array<int> phase2; // list of model regions containing the phase 2 dielectric
+    Array<int> dbcs;
+    Array<int> phase1; // list of model regions containing the phase 1 dielectric
+    Array<int> phase2; // list of model regions containing the phase 2 dielectric
 
 
-   OptionsParser args(argc, argv);
-   args.AddOption(&mesh_file, "-m", "--mesh",
-                  "Mesh file to use.");
-   args.AddOption(&order, "-o", "--order",
-                  "Finite element order (polynomial degree).");
-   args.AddOption(&phase1, "-s", "--substrate",
-                  "List of Model Regions Containing Phase 1 (Substrate).");
-   args.AddOption(&phase2, "-i", "--inclusion",
-                  "List of Model Regions Containing Phase 2 (Inclusion).");
-   args.AddOption(&kappa, "-k", "--kappa",
-                  "Relative permittivity phase 2.");
-   args.AddOption(&dbcs, "-dbcs", "--dirichlet-bc-surf",
-                  "Dirichlet Boundary Condition Surfaces");
-   args.AddOption(&maxit, "-maxit", "--max-amr-iterations",
-                  "Max number of iterations in the main AMR loop.");
-   args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
-                  "--no-visualization",
-                  "Enable or disable GLVis visualization.");
-   args.AddOption(&visit, "-visit", "--visit", "-no-visit", "--no-visit",
-                  "Enable or disable VisIt visualization.");
-   args.Parse();
-   if (!args.Good())
-   {
+    OptionsParser args(argc, argv);
+    args.AddOption(&mesh_file, "-m", "--mesh",
+        "Mesh file to use.");
+    args.AddOption(&order, "-o", "--order",
+        "Finite element order (polynomial degree).");
+    args.AddOption(&phase1, "-s", "--substrate",
+        "List of Model Regions Containing Phase 1 (Substrate).");
+    args.AddOption(&phase2, "-i", "--inclusion",
+        "List of Model Regions Containing Phase 2 (Inclusion).");
+    args.AddOption(&kappa, "-k", "--kappa",
+        "Relative permittivity phase 2.");
+    args.AddOption(&dbcs, "-dbcs", "--dirichlet-bc-surf",
+        "Dirichlet Boundary Condition Surfaces");
+    args.AddOption(&maxit, "-maxit", "--max-amr-iterations",
+        "Max number of iterations in the main AMR loop.");
+    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
+        "--no-visualization",
+        "Enable or disable GLVis visualization.");
+    args.AddOption(&visit, "-visit", "--visit", "-no-visit", "--no-visit",
+        "Enable or disable VisIt visualization.");
+    args.Parse();
+    if (!args.Good())
+    {
       if (mpi.Root())
       {
-         args.PrintUsage(cout);
+        args.PrintUsage(cout);
       }
       return 1;
-   }
-   if (mpi.Root())
-   {
+    }
+    if (mpi.Root())
+    {
       args.PrintOptions(cout);
-   }
+    }
 
-   // Read the (serial) mesh from the given mesh file on all processors.  We
-   // can handle triangular, quadrilateral, tetrahedral, hexahedral, surface
-   // and volume meshes with the same code.
-   //Mesh *mesh = new Mesh(mesh_file, 1, 1);
-   ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
+    // Read the (serial) mesh from the given mesh file on all processors.  We
+    // can handle triangular, quadrilateral, tetrahedral, hexahedral, surface
+    // and volume meshes with the same code.
+    //Mesh *mesh = new Mesh(mesh_file, 1, 1);
+    ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
 
-   int sdim = pmesh->SpaceDimension();
+    int dim = pmesh->SpaceDimension();
 
-   if (mpi.Root())
-   {
+    if (mpi.Root())
+    {
       cout << "Starting initialization." << endl;
-   }
+    }
 
 
-   // Define a parallel mesh by a partitioning of the serial mesh. Refine
-   // this mesh further in parallel to increase the resolution. Once the
-   // parallel mesh is defined, the serial mesh can be deleted.
-   //ParMesh pmesh(MPI_COMM_WORLD, *mesh);
-   //delete mesh;
+    // Define a parallel mesh by a partitioning of the serial mesh. Refine
+    // this mesh further in parallel to increase the resolution. Once the
+    // parallel mesh is defined, the serial mesh can be deleted.
+    //ParMesh pmesh(MPI_COMM_WORLD, *mesh);
+    //delete mesh;
 
-   // Make sure tet-only meshes are marked for local refinement.
-   //pmesh.Finalize(true);
-
-
-   // Create a coefficient describing the dielectric permittivity
-   Coefficient * epsCoef =
-     SetupPermittivityCoefficient(pmesh->attributes.Max(),
-     	 epsilon1, epsilon2, phase1, phase2);
-
-   // Boundary Conditions
-   // Boundary conditions in this example are all around Dirichlet of the form
-   // phi = -E.x, where E is a constant vector. This type of boundary conditions
-   // mimics a uniform background electric field. Thus boundary conditions are
-   // provided by the function phi_bc_uniform(x).
-
-   // Create the Electrostatic solver
-   InclusionSolver Inclusion(*pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
+    // Make sure tet-only meshes are marked for local refinement.
+    pmesh->Finalize(true);
 
 
-   // Initialize GLVis visualization
-   if (visualization)
-   {
+    // Create a coefficient describing the dielectric permittivity
+    Coefficient * epsCoef =
+      SetupPermittivityCoefficient(pmesh->attributes.Max(),
+          epsilon1, epsilon2, phase1, phase2);
+
+    // Boundary Conditions
+    // Boundary conditions in this example are all around Dirichlet of the form
+    // phi = -E.x, where E is a constant vector. This type of boundary conditions
+    // mimics a uniform background electric field. Thus boundary conditions are
+    // provided by the function phi_bc_uniform(x).
+
+    // Create the Electrostatic solver
+    InclusionSolver Inclusion(*pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
+
+
+    // Initialize GLVis visualization
+    if (visualization)
+    {
       Inclusion.InitializeGLVis();
-   }
+    }
 
-   // Initialize VisIt visualization
-   VisItDataCollection visit_dc("Inclusion-AMR-Parallel", pmesh);
+    // Initialize VisIt visualization
+    VisItDataCollection visit_dc("Inclusion-AMR-Parallel", pmesh);
 
-   if ( visit )
-   {
+    if ( visit )
+    {
       Inclusion.RegisterVisItFields(visit_dc);
-   }
-   if (mpi.Root()) { cout << "Initialization done." << endl; }
+    }
+    if (mpi.Root()) { cout << "Initialization done." << endl; }
 
-   // The main AMR loop. In each iteration we solve the problem on the current
-   // mesh, visualize the solution, estimate the error on all elements, refine
-   // the worst elements and update all objects to work with the new mesh.  We
-   // refine until the maximum number of dofs in the nodal finite element space
-   // reaches 10 million.
-   const int max_dofs = 10000000;
-   for (int it = 1; it <= maxit; it++)
-   {
+    // The main AMR loop. In each iteration we solve the problem on the current
+    // mesh, visualize the solution, estimate the error on all elements, refine
+    // the worst elements and update all objects to work with the new mesh.  We
+    // refine until the maximum number of dofs in the nodal finite element space
+    // reaches 10 million.
+    const int max_dofs = 10000000;
+    for (int it = 1; it <= maxit; it++)
+    {
+      printf("in amr loop\n");
       if (mpi.Root())
       {
-         cout << "\nAMR Iteration " << it << endl;
+        cout << "\nAMR Iteration " << it << endl;
       }
 
       // Display the current number of DoFs in each finite element space
@@ -254,81 +254,106 @@ int main(int argc, char *argv[])
       // Write fields to disk for VisIt
       if ( visit )
       {
-         Inclusion.WriteVisItFields(it);
+        Inclusion.WriteVisItFields(it);
       }
 
       // Send the solution by socket to a GLVis server.
       if (visualization)
       {
-         Inclusion.DisplayToGLVis();
+        Inclusion.DisplayToGLVis();
       }
 
       if (mpi.Root())
       {
-         cout << "AMR iteration " << it << " complete." << endl;
+        cout << "AMR iteration " << it << " complete." << endl;
       }
 
       // Check stopping criteria
       if (prob_size > max_dofs)
       {
-         if (mpi.Root())
-         {
-            cout << "Reached maximum number of dofs, exiting..." << endl;
-         }
-         break;
+        if (mpi.Root())
+        {
+          cout << "Reached maximum number of dofs, exiting..." << endl;
+        }
+        break;
       }
       if (it == maxit)
       {
-         break;
+        //break;
       }
 
       // Wait for user input. Ask every 10th iteration.
       char c = 'c';
       if (mpi.Root() && (it % 10 == 0))
       {
-         cout << "press (q)uit or (c)ontinue --> " << flush;
-         cin >> c;
+        cout << "press (q)uit or (c)ontinue --> " << flush;
+        cin >> c;
       }
       MPI_Bcast(&c, 1, MPI_CHAR, 0, MPI_COMM_WORLD);
 
       if (c != 'c')
       {
-         break;
+        break;
       }
 
+      Vector errors(pmesh->GetNE());
+      Inclusion.GetErrorEstimates(errors);
       if (isAmr)
       {
-	// Estimate element errors using the Zienkiewicz-Zhu error estimator.
-	Vector errors(pmesh->GetNE());
-	Inclusion.GetErrorEstimates(errors);
+        // Estimate element errors using the Zienkiewicz-Zhu error estimator.
 
-	double local_max_err = errors.Max();
-	double global_max_err;
-	MPI_Allreduce(&local_max_err, &global_max_err, 1,
-		      MPI_DOUBLE, MPI_MAX, pmesh->GetComm());
+        double local_max_err = errors.Max();
+        double global_max_err;
+        MPI_Allreduce(&local_max_err, &global_max_err, 1,
+            MPI_DOUBLE, MPI_MAX, pmesh->GetComm());
 
-	// Refine the elements whose error is larger than a fraction of the
-	// maximum element error.
-	const double frac = 0.7;
-	double threshold = frac * global_max_err;
-	if (mpi.Root()) { cout << "Refining ..." << endl; }
-	pmesh->RefineByError(errors, threshold);
+        // Refine the elements whose error is larger than a fraction of the
+        // maximum element error.
+        const double frac = 0.7;
+        double threshold = frac * global_max_err;
+        if (mpi.Root()) { cout << "Refining ..." << endl; }
+        //pmesh->RefineByError(errors, threshold);
       }
+      // adapt
+      char Fname[128];
+      sprintf(Fname,
+          "inclusion_1x1_12k_4p.vtk");
+      char iter_str[8];
+      sprintf(iter_str, "_%d", Itr);
+      strcat(Fname, iter_str);
+      puts(Fname);
+
+      ParOmegaMesh* pOmesh = dynamic_cast<ParOmegaMesh*>(pmesh);
+      pOmesh->ElementFieldMFEMtoOmegaH (&o_mesh, errors, dim, "zz_error");
+      //pOmesh->SmoothElementField (&o_mesh, "zz_error");
+      //pOmesh->SmoothElementField (&o_mesh, "zz_error");
+      pOmesh->ProjectFieldElementtoVertex (&o_mesh, "zz_error");
+
+      // Save data in the ParaView format
+
+      /*
+      ParaViewDataCollection paraview_dc("12k", mfem_mesh);
+      paraview_dc.SetPrefixPath("1x1");
+      paraview_dc.SetLevelsOfDetail(1);
+      paraview_dc.SetDataFormat(VTKFormat::BINARY);
+      paraview_dc.SetHighOrderOutput(false);
+      paraview_dc.SetCycle(0);
+      paraview_dc.SetTime(0.0);
+      paraview_dc.RegisterField("Errors",&errors);
+      paraview_dc.Save();
+      */
+
+      printf("before run case\n");
+      oh::vtk::write_parallel("before_adapt", &o_mesh);
+      run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh);
+      //if ((Itr+1) < max_iter) run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh);
+      oh::vtk::write_parallel("after_adapt", &o_mesh);
 
       // Update the electrostatic solver to reflect the new state of the mesh.
       Inclusion.Update();
+    }
 
-      if (pmesh->Nonconforming() && mpi.WorldSize() > 1)
-      {
-         if (mpi.Root()) { cout << "Rebalancing ..." << endl; }
-         pmesh->Rebalance();
-
-         // Update again after rebalancing
-         Inclusion.Update();
-      }
-   }
-
-   delete epsCoef;
+    delete epsCoef;
   } // end iterative adaptation loop
 
    return 0;
