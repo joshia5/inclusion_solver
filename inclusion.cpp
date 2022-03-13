@@ -35,7 +35,15 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
     auto h = oh::Vector<dim>();
     auto vtxError = zz_error[v];
     for (oh::Int i = 0; i < dim; ++i)
-      h[i] = 0.00001/std::pow(std::abs(vtxError), 0.5);
+      h[i] = 0.000015/std::pow(std::abs(vtxError), 0.5);//no refinement near ellipse
+      //h[i] = 0.000000005/std::pow(std::abs(vtxError), 1.0);//cuda v small error
+      //h[i] = 0.00000001/std::pow(std::abs(vtxError), 1.0);//no refinement near ellipse
+      //h[i] = 0.00000002/std::pow(std::abs(vtxError), 1.0);//v.less refinement
+      //h[i] = 0.00000002/std::pow(std::abs(vtxError), 1.0);//too much refinement
+      //h[i] = 0.002/std::pow(std::abs(vtxError), 1.0);//no refinement
+      //h[i] = 0.00002/std::pow(std::abs(vtxError), 1.0);//no refinement
+      //h[i] = 0.00002/std::pow(std::abs(vtxError), 0.5);//not enough refine near ellipse
+      //h[i] = 0.00001/std::pow(std::abs(vtxError), 0.5);//not good
       //h[i] = 0.001/std::pow(std::abs(vtxError), 0.6);//1k, 0.33mil
     auto m = diagonal(metric_eigenvalues_from_lengths(h));
     set_symm(target_metrics_w, v, m);
@@ -64,13 +72,15 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   }
   auto opts = oh::AdaptOpts(mesh);
   opts.verbosity = oh::EXTRA_STATS;
-  opts.length_histogram_max = 2.0;
+  opts.length_histogram_max = 3.0;
   opts.max_length_allowed = opts.max_length_desired * 4.0;
-  //opts.min_quality_allowed = 0.00001;
+  opts.min_quality_allowed = 0.0001;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
   oh::Now t0 = oh::now();
   while (approach_metric(mesh, opts)) {
     printf("approach metric\n");
+    //adapt_refine(mesh, opts);
+    //satisfy_quality(mesh, opts);
     adapt(mesh, opts);
     if (mesh->has_tag(oh::VERT, "target_metric")) set_target_metric<dim>(mesh,
                       scale, pOmesh);
@@ -105,7 +115,7 @@ int main(int argc, char *argv[])
                     lib.world(), &o_mesh);
 
   //number of adaptation iterations
-  int max_iter = 1;
+  int max_iter = 3;
   for (int Itr = 0; Itr < max_iter; Itr++)  {
 
     // problem constants and attribute and bdr attribute lists corresponding
@@ -118,7 +128,7 @@ int main(int argc, char *argv[])
     //int inclusion_regions[1] = {92};
     double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
     double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
-    bool isAmr = false;
+    bool isAmr = true;
 
 
 
@@ -325,9 +335,10 @@ int main(int argc, char *argv[])
 
       ParOmegaMesh* pOmesh = dynamic_cast<ParOmegaMesh*>(pmesh);
       pOmesh->ElementFieldMFEMtoOmegaH (&o_mesh, errors, dim, "zz_error");
-      //pOmesh->SmoothElementField (&o_mesh, "zz_error");
-      //pOmesh->SmoothElementField (&o_mesh, "zz_error");
+      pOmesh->SmoothElementField (&o_mesh, "zz_error");
+      pOmesh->SmoothElementField (&o_mesh, "zz_error");
       pOmesh->ProjectFieldElementtoVertex (&o_mesh, "zz_error");
+      pOmesh->ProjectFieldElementtoEdge (&o_mesh, "zz_error");
 
       // Save data in the ParaView format
 
@@ -343,11 +354,11 @@ int main(int argc, char *argv[])
       paraview_dc.Save();
       */
 
-      printf("before run case\n");
-      oh::vtk::write_parallel("before_adapt", &o_mesh);
+      printf("before adapt run case\n");
+      if (Itr == 0) oh::vtk::write_parallel("before_adapt", &o_mesh);
       run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh);
       //if ((Itr+1) < max_iter) run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh);
-      oh::vtk::write_parallel("after_adapt", &o_mesh);
+      //oh::vtk::write_parallel("after_adapt", &o_mesh);
 
       // Update the electrostatic solver to reflect the new state of the mesh.
       Inclusion.Update();
