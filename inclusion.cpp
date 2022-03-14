@@ -12,6 +12,7 @@
 #include <Omega_h_for.hpp>
 #include <Omega_h_metric.hpp>
 #include <Omega_h_timer.hpp>
+#include <Omega_h_array_ops.hpp>
 
 namespace oh = Omega_h;
 
@@ -22,20 +23,26 @@ namespace { // anonymous namespace
  */
 template <oh::Int dim>
 static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
-  *pOmesh) {
+  *pOmesh, oh::Real error_des) {
   auto coords = mesh->coords();
   auto target_metrics_w = oh::Write<oh::Real>
     (mesh->nverts() * oh::symm_ncomps(dim));
-  pOmesh->ProjectFieldElementtoVertex (mesh, "zz_error");
-  auto zz_error = mesh->get_array<oh::Real> (0, "zz_error");
+
+  auto length_edg = mesh->ask_lengths();
+  oh::ProjectFieldtoVertex (mesh, "length", 1);
+  auto error_c = mesh->get_array<oh::Real> (0, "zz_error");
+  auto length_c = mesh->get_array<oh::Real> (0, "length");
+
   auto f = OMEGA_H_LAMBDA(oh::LO v) {
     auto x = coords[v*dim];
     auto y = coords[v*dim + 1];
     auto z = coords[v*dim + 2];
     auto h = oh::Vector<dim>();
-    auto vtxError = zz_error[v];
+    auto vtxError = error_c[v];
     for (oh::Int i = 0; i < dim; ++i)
-      h[i] = 0.00001/std::pow(std::abs(vtxError), 0.5);//
+      h[i] = std::pow((error_des/vtxError)*std::pow(length_c[i], 2), 0.5);//
+      //h[i] = 0.000005/std::pow(std::abs(vtxError), 0.5);//seems reasonable, no coarsen
+      //h[i] = 0.00001/std::pow(std::abs(vtxError), 0.5);//ok, but too coarse
       //h[i] = 0.000015/std::pow(std::abs(vtxError), 0.5);//better but less refine
       //h[i] = 0.000000005/std::pow(std::abs(vtxError), 1.0);//cuda v small error
       //h[i] = 0.00000001/std::pow(std::abs(vtxError), 1.0);//no refinement near ellipse
@@ -55,14 +62,14 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
 
 template <oh::Int dim>
 void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
-              const oh::Int myid, ParOmegaMesh *pOmesh) {
+              const oh::Int myid, ParOmegaMesh *pOmesh, const oh::Real error_des) {
   printf("in run case\n");
   auto world = mesh->comm();
   mesh->set_parting(OMEGA_H_GHOSTED);
   auto implied_metrics = get_implied_metrics(mesh);
   mesh->add_tag(oh::VERT, "metric", oh::symm_ncomps(dim), implied_metrics);
   mesh->add_tag<oh::Real>(oh::VERT, "target_metric", oh::symm_ncomps(dim));
-  set_target_metric<dim>(mesh, scale, pOmesh);
+  set_target_metric<dim>(mesh, scale, pOmesh, error_des);
   mesh->set_parting(OMEGA_H_ELEM_BASED);
   mesh->ask_lengths();
   mesh->ask_qualities();
@@ -73,9 +80,10 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   }
   auto opts = oh::AdaptOpts(mesh);
   opts.verbosity = oh::EXTRA_STATS;
-  opts.length_histogram_max = 3.0;
-  opts.max_length_allowed = opts.max_length_desired * 4.0;
-  opts.min_quality_allowed = 0.0001;
+  //opts.max_length_allowed = opts.max_length_desired * 4.0;
+  //opts.min_quality_allowed = 0.1;
+  //opts.min_quality_allowed = 0.0001;
+  //opts.should_coarsen = false;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
   oh::Now t0 = oh::now();
   while (approach_metric(mesh, opts)) {
@@ -84,7 +92,7 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
     //satisfy_quality(mesh, opts);
     adapt(mesh, opts);
     if (mesh->has_tag(oh::VERT, "target_metric")) set_target_metric<dim>(mesh,
-                      scale, pOmesh);
+                      scale, pOmesh, error_des);
     if (vtk_path) writer.write();
   }
   oh::Now t1 = oh::now();
@@ -129,7 +137,7 @@ int main(int argc, char *argv[])
     //int inclusion_regions[1] = {92};
     double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
     double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
-    bool isAmr = true;
+    bool isAmr = false;
 
 
 
@@ -137,8 +145,8 @@ int main(int argc, char *argv[])
     const char *mesh_file = "";
     int order = 1;
     int maxit = 1;
-    bool visualization = true;
-    bool visit = true;
+    bool visualization = false;
+    bool visit = false;
 
     Array<int> dbcs;
     Array<int> phase1; // list of model regions containing the phase 1 dielectric
@@ -336,10 +344,9 @@ int main(int argc, char *argv[])
 
       ParOmegaMesh* pOmesh = dynamic_cast<ParOmegaMesh*>(pmesh);
       pOmesh->ElementFieldMFEMtoOmegaH (&o_mesh, errors, dim, "zz_error");
-      pOmesh->SmoothElementField (&o_mesh, "zz_error");
-      pOmesh->SmoothElementField (&o_mesh, "zz_error");
+      //pOmesh->SmoothElementField (&o_mesh, "zz_error");
+      //pOmesh->SmoothElementField (&o_mesh, "zz_error");
       pOmesh->ProjectFieldElementtoVertex (&o_mesh, "zz_error");
-      pOmesh->ProjectFieldElementtoEdge (&o_mesh, "zz_error");
 
       // Save data in the ParaView format
 
@@ -354,10 +361,24 @@ int main(int argc, char *argv[])
       paraview_dc.RegisterField("Errors",&errors);
       paraview_dc.Save();
       */
+      double errorVol_tot_loc = 0.0;
+      double vol_tot_loc = 0.0;
+      for (int i = 0; i < pmesh->GetNE(); i++) {
+        auto vol_loc = pmesh->GetElementVolume(i);
+        vol_tot_loc += vol_loc;
+        errorVol_tot_loc += errors[i]*vol_loc;
+      }
+      double vol_tot;
+      double errorVol_tot;
+      MPI_Allreduce(&vol_tot_loc, &vol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      MPI_Allreduce(&errorVol_tot_loc, &errorVol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      double error_bar = errorVol_tot/vol_tot;
+      const double frac = 0.7;
+      const double error_des = frac*error_bar;
 
       printf("before adapt run case\n");
       if (Itr == 0) oh::vtk::write_parallel("before_adapt", &o_mesh);
-      run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh);
+      run_case<3>(&o_mesh, Fname, 1, myid, pOmesh, error_des);
       //if ((Itr+1) < max_iter) run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh);
       //oh::vtk::write_parallel("after_adapt", &o_mesh);
 
