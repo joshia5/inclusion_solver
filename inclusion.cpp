@@ -35,7 +35,8 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
     auto h = oh::Vector<dim>();
     auto vtxError = zz_error[v];
     for (oh::Int i = 0; i < dim; ++i)
-      h[i] = 0.000015/std::pow(std::abs(vtxError), 0.5);//no refinement near ellipse
+      h[i] = 0.00001/std::pow(std::abs(vtxError), 0.5);//
+      //h[i] = 0.000015/std::pow(std::abs(vtxError), 0.5);//better but less refine
       //h[i] = 0.000000005/std::pow(std::abs(vtxError), 1.0);//cuda v small error
       //h[i] = 0.00000001/std::pow(std::abs(vtxError), 1.0);//no refinement near ellipse
       //h[i] = 0.00000002/std::pow(std::abs(vtxError), 1.0);//v.less refinement
@@ -115,7 +116,7 @@ int main(int argc, char *argv[])
                     lib.world(), &o_mesh);
 
   //number of adaptation iterations
-  int max_iter = 3;
+  int max_iter = 10;
   for (int Itr = 0; Itr < max_iter; Itr++)  {
 
     // problem constants and attribute and bdr attribute lists corresponding
