@@ -24,7 +24,7 @@ namespace { // anonymous namespace
  */
 template <oh::Int dim>
 static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
-  *pOmesh, oh::Real error_des) {
+  *pOmesh, oh::Real error_des2) {
   auto coords = mesh->coords();
   auto target_metrics_w = oh::Write<oh::Real>
     (mesh->nverts() * oh::symm_ncomps(dim));
@@ -59,8 +59,9 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
     auto h = oh::Vector<dim>();
     auto vtxError = error_c[v];
     for (oh::Int i = 0; i < dim; ++i) {
-      h[i] = std::pow((error_des/vtxError), 0.5)*length_c[v];//
-      if ((class_id[v] == 186) || (class_id[v] == 190)) h[i] = length_c[v];
+      h[i] = std::pow((error_des2/vtxError), 0.5)*length_c[v];
+      if (class_id[v] == 186) h[i] = 0.5*length_c[v];
+      if (class_id[v] == 190) h[i] = 0.25*length_c[v];
       hd_hc[v] = h[i]/length_c[v];
     }
     auto m = diagonal(metric_eigenvalues_from_lengths(h));
@@ -69,19 +70,18 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
   oh::parallel_for(mesh->nverts(), f);
   mesh->set_tag(oh::VERT, "target_metric", oh::Reals(target_metrics_w));
   mesh->add_tag(oh::VERT, "hd_hc", 1, oh::Reals(hd_hc));
-  if (scale == 0) oh::vtk::write_parallel("before_adapt", mesh);
 }
 
 template <oh::Int dim>
 void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
-              const oh::Int myid, ParOmegaMesh *pOmesh, const oh::Real error_des) {
+              const oh::Int myid, ParOmegaMesh *pOmesh, const oh::Real error_des2) {
   printf("in run case\n");
   auto world = mesh->comm();
   mesh->set_parting(OMEGA_H_GHOSTED);
   auto implied_metrics = get_implied_metrics(mesh);
   mesh->add_tag(oh::VERT, "metric", oh::symm_ncomps(dim), implied_metrics);
   mesh->add_tag<oh::Real>(oh::VERT, "target_metric", oh::symm_ncomps(dim));
-  set_target_metric<dim>(mesh, scale, pOmesh, error_des);
+  set_target_metric<dim>(mesh, scale, pOmesh, error_des2);
   mesh->set_parting(OMEGA_H_ELEM_BASED);
   mesh->ask_lengths();
   mesh->ask_qualities();
@@ -93,16 +93,12 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   auto opts = oh::AdaptOpts(mesh);
   //opts.verbosity = oh::EXTRA_STATS;
   //opts.max_length_allowed = opts.max_length_desired * 4.0;
-  //opts.min_quality_allowed = 0.01;
-  //opts.min_quality_desired = 0.5;
   //opts.should_coarsen = false;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
   oh::Now t0 = oh::now();
   while (approach_metric(mesh, opts)) {
     printf("approach metric\n");
     adapt(mesh, opts);
-    if (mesh->has_tag(oh::VERT, "target_metric")) set_target_metric<dim>(mesh,
-                      scale+1, pOmesh, error_des);
     if (vtk_path) {
       writer.write();
     }
@@ -137,14 +133,16 @@ int main(int argc, char *argv[])
    "/lore/joshia5/Meshes/oh-mfem/inclusion_setup_1x1_coarser_mesh-coarse_4p.osh",
                     lib.world(), &o_mesh);
 
+  double error_des = 0.0;
+
   //number of adaptation iterations
-  int max_iter = 2;
+  int max_iter = 10;
   for (int Itr = 0; Itr < max_iter; Itr++)  {
 
     // problem constants and attribute and bdr attribute lists corresponding
     // to different regions and boundaries of the problem
     // NOTE: the list containing model tags are model dependent
-    double kappa = 1000.; // relative permittivity of phase 2 wrt vacuum
+    double kappa = 80.; // relative permittivity of phase 2 wrt vacuum
     //int num_substrate = 1; // number of regions in the substrate phase (1)
     //int num_inclusion = 1; // number of regions in the inclusion phase (2)
     //int substrate_regions[1] = {186};
@@ -260,8 +258,7 @@ int main(int argc, char *argv[])
     // refine until the maximum number of dofs in the nodal finite element space
     // reaches 10 million.
     const int max_dofs = 10000000;
-    for (int it = 1; it <= maxit; it++)
-    {
+    int it = 1;
       printf("in amr loop\n");
       if (mpi.Root())
       {
@@ -277,8 +274,6 @@ int main(int argc, char *argv[])
       // Solve the system and compute any auxiliary fields
       Inclusion.Solve();
 
-      stringstream ss;
-      ss << "inclusion_iter_" << it;
       // Determine the current size of the linear system
       int prob_size = Inclusion.GetProblemSize();
 
@@ -340,7 +335,7 @@ int main(int argc, char *argv[])
 
         // Refine the elements whose error is larger than a fraction of the
         // maximum element error.
-        const double frac = 0.7;
+        const double frac = 0.1;
         double threshold = frac * global_max_err;
         if (mpi.Root()) { cout << "Refining ..." << endl; }
         pmesh->RefineByError(errors, threshold);
@@ -360,7 +355,7 @@ int main(int argc, char *argv[])
       // Save data in the ParaView format
 
       /*
-      ParaViewDataCollection paraview_dc("12k", mfem_mesh);
+      ParaViewDataCollection paraview_dc("4k", mfem_mesh);
       paraview_dc.SetPrefixPath("1x1");
       paraview_dc.SetLevelsOfDetail(1);
       paraview_dc.SetDataFormat(VTKFormat::BINARY);
@@ -370,6 +365,7 @@ int main(int argc, char *argv[])
       paraview_dc.RegisterField("Errors",&errors);
       paraview_dc.Save();
       */
+  
       for (int i = 0; i < pmesh->GetNE(); i++) {
         //printf("elem %d , vol %1.10f, err %1.10f\n", i,pmesh->GetElementVolume(i),errors[i]); 
       }
@@ -400,22 +396,29 @@ int main(int argc, char *argv[])
       MPI_Allreduce(&vol_tot_loc, &vol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
       MPI_Allreduce(&errorVol_tot_loc, &errorVol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
       MPI_Allreduce(&error_tot_loc, &error_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-      //double error_bar = error_tot/(pmesh->GetNE()*1.0);
       double error_bar = errorVol_tot/vol_tot;
-      const double frac = 0.7;
-      //const double frac = 0.005;//hd_hc 0.6 in incl but coarse
-      //const double frac = 0.0005;//adapt fails
-      const double error_des = frac*error_bar;
+      const double frac = 0.1;
+      if (Itr == 0) error_des = frac*error_bar;
 
-      printf("before adapt run case error max %1.10f error min %1.19f error_bar %1.10f\n",
-          global_max_err, global_min_err, error_bar);
+      printf("before adapt run case error max %1.10f error min %1.19f error_bar %1.10f error_des %1.10f\n",
+          global_max_err, global_min_err, error_bar, error_des);
+      //if (error_bar < error_des) break;
+
+      stringstream ss;
+      ss << "inclusion_iter_" << Itr;
+      Inclusion.WriteToVtk(ss.str().c_str());
+
+      if (global_max_err < error_des) {
+        oh::vtk::write_parallel("before_break", &o_mesh);
+        cout << "converged\n";
+        break;
+      }
+
       if (Itr < max_iter) run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh, error_des);
       oh::vtk::write_parallel("after_adapt", &o_mesh);
-      Inclusion.WriteToVtk(ss.str().c_str());
 
       // Update the electrostatic solver to reflect the new state of the mesh.
       Inclusion.Update();
-    }
 
     delete epsCoef;
   } // end iterative adaptation loop
