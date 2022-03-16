@@ -13,6 +13,7 @@
 #include <Omega_h_metric.hpp>
 #include <Omega_h_timer.hpp>
 #include <Omega_h_array_ops.hpp>
+#include <Omega_h_vector.hpp>
 
 namespace oh = Omega_h;
 
@@ -27,37 +28,48 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
   auto coords = mesh->coords();
   auto target_metrics_w = oh::Write<oh::Real>
     (mesh->nverts() * oh::symm_ncomps(dim));
+  pOmesh->ProjectFieldElementtoVertex (mesh, "zz_error");
 
-  auto length_edg = mesh->ask_lengths();
-  oh::ProjectFieldtoVertex (mesh, "length", 1);
+  auto hd_hc = oh::Write<oh::Real>(mesh->nverts());
+
   auto error_c = mesh->get_array<oh::Real> (0, "zz_error");
-  auto length_c = mesh->get_array<oh::Real> (0, "length");
+
+  auto ev2v = mesh->get_adj(1,0).ab2b;
+  auto length_edg_w = oh::Write<oh::Real> (mesh->nedges());
+  auto f1 = OMEGA_H_LAMBDA(oh::LO e) {
+    auto v0 = ev2v[e*2 + 0];
+    auto v1 = ev2v[e*2 + 1];
+    auto p0 = oh::get_vector<dim>(coords, v0);
+    auto p1 = oh::get_vector<dim>(coords, v1);
+    oh::Real dist = 0.0;
+    for (oh::Int i = 0; i < dim; ++i) {
+      dist += (p1[i] - p0[i])*(p1[i] - p0[i]);
+    }
+    dist = std::pow(dist, 0.5);
+    length_edg_w[e] = dist;
+  };
+  oh::parallel_for(mesh->nedges(), f1);
+  mesh->add_tag(oh::EDGE, "length_parent", 1, oh::Reals(length_edg_w));
+  oh::ProjectFieldtoVertex (mesh, "length_parent", 1);
+  auto length_c = mesh->get_array<oh::Real> (0, "length_parent");
+
+  auto class_id = mesh->get_array<oh::LO> (0, "class_id");
 
   auto f = OMEGA_H_LAMBDA(oh::LO v) {
-    auto x = coords[v*dim];
-    auto y = coords[v*dim + 1];
-    auto z = coords[v*dim + 2];
     auto h = oh::Vector<dim>();
     auto vtxError = error_c[v];
-    for (oh::Int i = 0; i < dim; ++i)
-      h[i] = std::pow((error_des/vtxError)*std::pow(length_c[i], 2), 0.5);//
-      //h[i] = 0.000005/std::pow(std::abs(vtxError), 0.5);//seems reasonable, no coarsen
-      //h[i] = 0.00001/std::pow(std::abs(vtxError), 0.5);//ok, but too coarse
-      //h[i] = 0.000015/std::pow(std::abs(vtxError), 0.5);//better but less refine
-      //h[i] = 0.000000005/std::pow(std::abs(vtxError), 1.0);//cuda v small error
-      //h[i] = 0.00000001/std::pow(std::abs(vtxError), 1.0);//no refinement near ellipse
-      //h[i] = 0.00000002/std::pow(std::abs(vtxError), 1.0);//v.less refinement
-      //h[i] = 0.00000002/std::pow(std::abs(vtxError), 1.0);//too much refinement
-      //h[i] = 0.002/std::pow(std::abs(vtxError), 1.0);//no refinement
-      //h[i] = 0.00002/std::pow(std::abs(vtxError), 1.0);//no refinement
-      //h[i] = 0.00002/std::pow(std::abs(vtxError), 0.5);//not enough refine near ellipse
-      //h[i] = 0.00001/std::pow(std::abs(vtxError), 0.5);//not good
-      //h[i] = 0.001/std::pow(std::abs(vtxError), 0.6);//1k, 0.33mil
+    for (oh::Int i = 0; i < dim; ++i) {
+      h[i] = std::pow((error_des/vtxError), 0.5)*length_c[v];//
+      if ((class_id[v] == 186) || (class_id[v] == 190)) h[i] = length_c[v];
+      hd_hc[v] = h[i]/length_c[v];
+    }
     auto m = diagonal(metric_eigenvalues_from_lengths(h));
     set_symm(target_metrics_w, v, m);
   };
   oh::parallel_for(mesh->nverts(), f);
   mesh->set_tag(oh::VERT, "target_metric", oh::Reals(target_metrics_w));
+  mesh->add_tag(oh::VERT, "hd_hc", 1, oh::Reals(hd_hc));
+  if (scale == 0) oh::vtk::write_parallel("before_adapt", mesh);
 }
 
 template <oh::Int dim>
@@ -79,24 +91,25 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
     writer.write();
   }
   auto opts = oh::AdaptOpts(mesh);
-  opts.verbosity = oh::EXTRA_STATS;
+  //opts.verbosity = oh::EXTRA_STATS;
   //opts.max_length_allowed = opts.max_length_desired * 4.0;
-  //opts.min_quality_allowed = 0.1;
-  //opts.min_quality_allowed = 0.0001;
+  //opts.min_quality_allowed = 0.01;
+  //opts.min_quality_desired = 0.5;
   //opts.should_coarsen = false;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
   oh::Now t0 = oh::now();
   while (approach_metric(mesh, opts)) {
     printf("approach metric\n");
-    //adapt_refine(mesh, opts);
-    //satisfy_quality(mesh, opts);
     adapt(mesh, opts);
     if (mesh->has_tag(oh::VERT, "target_metric")) set_target_metric<dim>(mesh,
-                      scale, pOmesh, error_des);
-    if (vtk_path) writer.write();
+                      scale+1, pOmesh, error_des);
+    if (vtk_path) {
+      writer.write();
+    }
   }
   oh::Now t1 = oh::now();
   if (!myid) std::cout << "total time: " << (t1 - t0) << " seconds\n";
+
 }
 
 } // end anonymous namespace
@@ -120,17 +133,18 @@ int main(int argc, char *argv[])
      auto lib = oh::Library();
        oh::Mesh o_mesh(&lib);
   //
-   oh::binary::read ("/lore/joshia5/Meshes/oh-mfem/inclusion_1x1_12k_4p.osh",
+   oh::binary::read (
+   "/lore/joshia5/Meshes/oh-mfem/inclusion_setup_1x1_coarser_mesh-coarse_4p.osh",
                     lib.world(), &o_mesh);
 
   //number of adaptation iterations
-  int max_iter = 10;
+  int max_iter = 2;
   for (int Itr = 0; Itr < max_iter; Itr++)  {
 
     // problem constants and attribute and bdr attribute lists corresponding
     // to different regions and boundaries of the problem
     // NOTE: the list containing model tags are model dependent
-    double kappa = 2.; // relative permittivity of phase 2 wrt vacuum
+    double kappa = 1000.; // relative permittivity of phase 2 wrt vacuum
     //int num_substrate = 1; // number of regions in the substrate phase (1)
     //int num_inclusion = 1; // number of regions in the inclusion phase (2)
     //int substrate_regions[1] = {186};
@@ -207,7 +221,6 @@ int main(int argc, char *argv[])
     //ParMesh pmesh(MPI_COMM_WORLD, *mesh);
     //delete mesh;
 
-    // Make sure tet-only meshes are marked for local refinement.
     pmesh->Finalize(true);
 
 
@@ -266,7 +279,6 @@ int main(int argc, char *argv[])
 
       stringstream ss;
       ss << "inclusion_iter_" << it;
-      Inclusion.WriteToVtk(ss.str().c_str());
       // Determine the current size of the linear system
       int prob_size = Inclusion.GetProblemSize();
 
@@ -331,7 +343,7 @@ int main(int argc, char *argv[])
         const double frac = 0.7;
         double threshold = frac * global_max_err;
         if (mpi.Root()) { cout << "Refining ..." << endl; }
-        //pmesh->RefineByError(errors, threshold);
+        pmesh->RefineByError(errors, threshold);
       }
       // adapt
       char Fname[128];
@@ -344,9 +356,6 @@ int main(int argc, char *argv[])
 
       ParOmegaMesh* pOmesh = dynamic_cast<ParOmegaMesh*>(pmesh);
       pOmesh->ElementFieldMFEMtoOmegaH (&o_mesh, errors, dim, "zz_error");
-      //pOmesh->SmoothElementField (&o_mesh, "zz_error");
-      //pOmesh->SmoothElementField (&o_mesh, "zz_error");
-      pOmesh->ProjectFieldElementtoVertex (&o_mesh, "zz_error");
 
       // Save data in the ParaView format
 
@@ -361,26 +370,48 @@ int main(int argc, char *argv[])
       paraview_dc.RegisterField("Errors",&errors);
       paraview_dc.Save();
       */
+      for (int i = 0; i < pmesh->GetNE(); i++) {
+        //printf("elem %d , vol %1.10f, err %1.10f\n", i,pmesh->GetElementVolume(i),errors[i]); 
+      }
+      double local_max_err = errors.Max();
+      double local_min_err = errors.Min();
+      //printf("before adapt run case error max %1.10f error min %1.10f \n",
+        //  local_max_err, local_min_err);
+      double global_max_err;
+      MPI_Allreduce(&local_max_err, &global_max_err, 1,
+          MPI_DOUBLE, MPI_MAX, pmesh->GetComm());
+
+      double global_min_err;
+      MPI_Allreduce(&local_min_err, &global_min_err, 1,
+          MPI_DOUBLE, MPI_MIN, pmesh->GetComm());
+
       double errorVol_tot_loc = 0.0;
+      double error_tot_loc = 0.0;
       double vol_tot_loc = 0.0;
       for (int i = 0; i < pmesh->GetNE(); i++) {
         auto vol_loc = pmesh->GetElementVolume(i);
         vol_tot_loc += vol_loc;
         errorVol_tot_loc += errors[i]*vol_loc;
+        error_tot_loc += errors[i];
       }
       double vol_tot;
       double errorVol_tot;
+      double error_tot;
       MPI_Allreduce(&vol_tot_loc, &vol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
       MPI_Allreduce(&errorVol_tot_loc, &errorVol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      MPI_Allreduce(&error_tot_loc, &error_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      //double error_bar = error_tot/(pmesh->GetNE()*1.0);
       double error_bar = errorVol_tot/vol_tot;
       const double frac = 0.7;
+      //const double frac = 0.005;//hd_hc 0.6 in incl but coarse
+      //const double frac = 0.0005;//adapt fails
       const double error_des = frac*error_bar;
 
-      printf("before adapt run case\n");
-      if (Itr == 0) oh::vtk::write_parallel("before_adapt", &o_mesh);
-      run_case<3>(&o_mesh, Fname, 1, myid, pOmesh, error_des);
-      //if ((Itr+1) < max_iter) run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh);
-      //oh::vtk::write_parallel("after_adapt", &o_mesh);
+      printf("before adapt run case error max %1.10f error min %1.19f error_bar %1.10f\n",
+          global_max_err, global_min_err, error_bar);
+      if (Itr < max_iter) run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh, error_des);
+      oh::vtk::write_parallel("after_adapt", &o_mesh);
+      Inclusion.WriteToVtk(ss.str().c_str());
 
       // Update the electrostatic solver to reflect the new state of the mesh.
       Inclusion.Update();
