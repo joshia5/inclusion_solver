@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
     // problem constants and attribute and bdr attribute lists corresponding
     // to different regions and boundaries of the problem
     // NOTE: the list containing model tags are model dependent
-    double kappa = 80.; // relative permittivity of phase 2 wrt vacuum
+    double kappa = 2.; // relative permittivity of phase 2 wrt vacuum
     //int num_substrate = 1; // number of regions in the substrate phase (1)
     //int num_inclusion = 1; // number of regions in the inclusion phase (2)
     //int substrate_regions[1] = {186};
