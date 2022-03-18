@@ -19,9 +19,6 @@ namespace oh = Omega_h;
 
 namespace { // anonymous namespace
 
-/* parts of this function is derived from the file
- * ugawg_linear.cpp of omega_h source code
- */
 template <oh::Int dim>
 static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
   *pOmesh, oh::Real error_des2) {
@@ -60,8 +57,6 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
     auto vtxError = error_c[v];
     for (oh::Int i = 0; i < dim; ++i) {
       h[i] = std::pow((error_des2/vtxError), 0.5)*length_c[v];
-      if (class_id[v] == 186) h[i] = 0.5*length_c[v];
-      if (class_id[v] == 190) h[i] = 0.25*length_c[v];
       hd_hc[v] = h[i]/length_c[v];
     }
     auto m = diagonal(metric_eigenvalues_from_lengths(h));
@@ -91,10 +86,9 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
     writer.write();
   }
   auto opts = oh::AdaptOpts(mesh);
-  //opts.verbosity = oh::EXTRA_STATS;
-  //opts.max_length_allowed = opts.max_length_desired * 4.0;
-  //opts.should_coarsen = false;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
+  opts.min_quality_allowed = 0.1;
+  opts.max_length_allowed = 4.0*opts.max_length_desired;
   oh::Now t0 = oh::now();
   while (approach_metric(mesh, opts)) {
     printf("approach metric\n");
@@ -130,7 +124,7 @@ int main(int argc, char *argv[])
        oh::Mesh o_mesh(&lib);
   //
    oh::binary::read (
-   "/lore/joshia5/Meshes/oh-mfem/inclusion_setup_1x1_coarser_mesh-coarse_4p.osh",
+   "/lore/joshia5/Meshes/oh-mfem/inclusion_setup_5x5_2p.osh",
                     lib.world(), &o_mesh);
 
   double error_des = 0.0;
@@ -212,12 +206,9 @@ int main(int argc, char *argv[])
       cout << "Starting initialization." << endl;
     }
 
-
     // Define a parallel mesh by a partitioning of the serial mesh. Refine
     // this mesh further in parallel to increase the resolution. Once the
     // parallel mesh is defined, the serial mesh can be deleted.
-    //ParMesh pmesh(MPI_COMM_WORLD, *mesh);
-    //delete mesh;
 
     pmesh->Finalize(true);
 
@@ -259,11 +250,6 @@ int main(int argc, char *argv[])
     // reaches 10 million.
     const int max_dofs = 10000000;
     int it = 1;
-      printf("in amr loop\n");
-      if (mpi.Root())
-      {
-        cout << "\nAMR Iteration " << it << endl;
-      }
 
       // Display the current number of DoFs in each finite element space
       Inclusion.PrintSizes();
@@ -289,10 +275,6 @@ int main(int argc, char *argv[])
         Inclusion.DisplayToGLVis();
       }
 
-      if (mpi.Root())
-      {
-        cout << "AMR iteration " << it << " complete." << endl;
-      }
 
       // Check stopping criteria
       if (prob_size > max_dofs)
@@ -302,10 +284,6 @@ int main(int argc, char *argv[])
           cout << "Reached maximum number of dofs, exiting..." << endl;
         }
         break;
-      }
-      if (it == maxit)
-      {
-        //break;
       }
 
       // Wait for user input. Ask every 10th iteration.
@@ -352,20 +330,6 @@ int main(int argc, char *argv[])
       ParOmegaMesh* pOmesh = dynamic_cast<ParOmegaMesh*>(pmesh);
       pOmesh->ElementFieldMFEMtoOmegaH (&o_mesh, errors, dim, "zz_error");
 
-      // Save data in the ParaView format
-
-      /*
-      ParaViewDataCollection paraview_dc("4k", mfem_mesh);
-      paraview_dc.SetPrefixPath("1x1");
-      paraview_dc.SetLevelsOfDetail(1);
-      paraview_dc.SetDataFormat(VTKFormat::BINARY);
-      paraview_dc.SetHighOrderOutput(false);
-      paraview_dc.SetCycle(0);
-      paraview_dc.SetTime(0.0);
-      paraview_dc.RegisterField("Errors",&errors);
-      paraview_dc.Save();
-      */
-  
       for (int i = 0; i < pmesh->GetNE(); i++) {
         //printf("elem %d , vol %1.10f, err %1.10f\n", i,pmesh->GetElementVolume(i),errors[i]); 
       }
