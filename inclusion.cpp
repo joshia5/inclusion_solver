@@ -88,6 +88,7 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   auto opts = oh::AdaptOpts(mesh);
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
   opts.min_quality_allowed = 0.1;
+  opts.min_quality_desired = 0.2;
   opts.max_length_allowed = 4.0*opts.max_length_desired;
   oh::Now t0 = oh::now();
   while (approach_metric(mesh, opts)) {
@@ -124,7 +125,7 @@ int main(int argc, char *argv[])
        oh::Mesh o_mesh(&lib);
   //
    oh::binary::read (
-   "/lore/joshia5/Meshes/oh-mfem/inclusion_setup_5x5_2p.osh",
+   "/lore/joshia5/Meshes/oh-mfem/setup_5x1_9k_2p.osh",
                     lib.world(), &o_mesh);
 
   double error_des = 0.0;
@@ -313,7 +314,7 @@ int main(int argc, char *argv[])
 
         // Refine the elements whose error is larger than a fraction of the
         // maximum element error.
-        const double frac = 0.1;
+        const double frac = 0.7;
         double threshold = frac * global_max_err;
         if (mpi.Root()) { cout << "Refining ..." << endl; }
         pmesh->RefineByError(errors, threshold);
