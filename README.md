@@ -1,6 +1,6 @@
 ## Summary
 
-This application (based on MFEM's Volta miniapp), solves the electrostatic problem for a substrate that includes an array of ellipsoidal inclusions with a different permittivity. The boundary conditions for this problem are consistent with a uniform background Electric field in the z direction of the coordinate axes.
+This application (based on MFEM's Volta miniapp https://mfem.org/electromagnetics/), solves the electrostatic problem for a substrate that includes an array of ellipsoidal inclusions with a different permittivity. The boundary conditions for this problem are consistent with a uniform background Electric field in the z direction of the coordinate axes.
 
 ## Build Instructions
 
