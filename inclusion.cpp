@@ -125,7 +125,7 @@ int main(int argc, char *argv[])
        oh::Mesh o_mesh(&lib);
   //
    oh::binary::read (
-   "/lore/joshia5/Meshes/oh-mfem/setup_5x1_9k_2p.osh",
+   "../meshes/setup_5x1_9k_2p.osh",
                     lib.world(), &o_mesh);
 
   double error_des = 0.0;
