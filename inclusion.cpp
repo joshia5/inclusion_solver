@@ -14,6 +14,7 @@
 #include <Omega_h_timer.hpp>
 #include <Omega_h_array_ops.hpp>
 #include <Omega_h_vector.hpp>
+#include <Omega_h_beziers.hpp>
 
 namespace oh = Omega_h;
 
@@ -86,6 +87,8 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
     writer.write();
   }
   auto opts = oh::AdaptOpts(mesh);
+  opts.should_swap = false;
+  opts.should_coarsen_slivers = false;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
   opts.min_quality_allowed = 0.1;
   opts.min_quality_desired = 0.2;
@@ -114,24 +117,23 @@ SetupPermittivityCoefficient(int max_attr, // max attribute in the mesh
 // Phi Boundary Condition
 double phi_bc_uniform(const Vector &);
 
-int main(int argc, char *argv[])
-{
-   MPI_Session mpi(argc, argv);
-   int myid;
-   MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+int main(int argc, char *argv[]) {
+  MPI_Session mpi(argc, argv);
+  int myid;
+  MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 
   // Read Omega_h mesh
-     auto lib = oh::Library();
-       oh::Mesh o_mesh(&lib);
-  //
-   oh::binary::read (
-   "../meshes/setup_5x1_9k_2p.osh",
-                    lib.world(), &o_mesh);
+  auto lib = oh::Library();
+  oh::Mesh o_mesh(&lib);
+  oh::binary::read ("../meshes/setup_1x1_crv_2p.osh",
+      lib.world(), &o_mesh);
+  oh::calc_quad_ctrlPts_from_interpPts(&o_mesh);
+  oh::elevate_curve_order_2to3(&o_mesh);
 
   double error_des = 0.0;
 
   //number of adaptation iterations
-  int max_iter = 10;
+  int max_iter = 1;
   for (int Itr = 0; Itr < max_iter; Itr++)  {
 
     // problem constants and attribute and bdr attribute lists corresponding
@@ -150,7 +152,7 @@ int main(int argc, char *argv[])
 
     // Parse command-line options.
     const char *mesh_file = "";
-    int order = 1;
+    int order = o_mesh.get_max_order();
     int maxit = 1;
     bool visualization = false;
     bool visit = false;
@@ -194,10 +196,6 @@ int main(int argc, char *argv[])
       args.PrintOptions(cout);
     }
 
-    // Read the (serial) mesh from the given mesh file on all processors.  We
-    // can handle triangular, quadrilateral, tetrahedral, hexahedral, surface
-    // and volume meshes with the same code.
-    //Mesh *mesh = new Mesh(mesh_file, 1, 1);
     ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
 
     int dim = pmesh->SpaceDimension();
@@ -213,7 +211,6 @@ int main(int argc, char *argv[])
 
     pmesh->Finalize(true);
 
-
     // Create a coefficient describing the dielectric permittivity
     Coefficient * epsCoef =
       SetupPermittivityCoefficient(pmesh->attributes.Max(),
@@ -227,7 +224,6 @@ int main(int argc, char *argv[])
 
     // Create the Electrostatic solver
     InclusionSolver Inclusion(*pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
-
 
     // Initialize GLVis visualization
     if (visualization)
@@ -322,7 +318,7 @@ int main(int argc, char *argv[])
       // adapt
       char Fname[128];
       sprintf(Fname,
-          "inclusion_1x1_12k_4p.vtk");
+          "inclusion_1x1_crv.vtk");
       char iter_str[8];
       sprintf(iter_str, "_%d", Itr);
       strcat(Fname, iter_str);
