@@ -148,9 +148,9 @@ void
 InclusionSolver::PrintSizes()
 {
    HYPRE_BigInt size_h1 = H1FESpace_->GlobalTrueVSize();
-   HYPRE_BigInt size_nd = HCurlFESpace_->GlobalTrueVSize();
    HYPRE_BigInt size_rt = HDivFESpace_->GlobalTrueVSize();
    HYPRE_BigInt size_l2 = L2FESpace_->GlobalTrueVSize();
+   HYPRE_BigInt size_nd = HCurlFESpace_->GlobalTrueVSize();
    if (myid_ == 0)
    {
       cout << "Number of H1      unknowns: " << size_h1 << endl;

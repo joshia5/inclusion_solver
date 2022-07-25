@@ -15,6 +15,7 @@
 #include <Omega_h_array_ops.hpp>
 #include <Omega_h_vector.hpp>
 #include <Omega_h_beziers.hpp>
+#include <Omega_h_build.hpp>
 
 namespace oh = Omega_h;
 
@@ -88,12 +89,14 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   }
   auto opts = oh::AdaptOpts(mesh);
   opts.should_swap = false;
+  opts.should_coarsen = false;
   opts.should_coarsen_slivers = false;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
-  opts.min_quality_allowed = 0.1;
+  opts.min_quality_allowed = 1e-15;
   opts.min_quality_desired = 0.2;
-  opts.max_length_allowed = 4.0*opts.max_length_desired;
+  opts.max_length_allowed = 4.5*opts.max_length_desired;
   oh::Now t0 = oh::now();
+  
   while (approach_metric(mesh, opts)) {
     printf("approach metric\n");
     adapt(mesh, opts);
@@ -101,6 +104,8 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
       writer.write();
     }
   }
+  
+  //adapt(mesh, opts);
   oh::Now t1 = oh::now();
   if (!myid) std::cout << "total time: " << (t1 - t0) << " seconds\n";
 
@@ -125,10 +130,28 @@ int main(int argc, char *argv[]) {
   // Read Omega_h mesh
   auto lib = oh::Library();
   oh::Mesh o_mesh(&lib);
-  oh::binary::read ("../meshes/setup_1x1_crv_2p.osh",
+  oh::binary::read ("../meshes/setup_1x1_crv.osh",
+  //oh::binary::read ("../meshes/setup_1x1_crv_2p.osh",
       lib.world(), &o_mesh);
   oh::calc_quad_ctrlPts_from_interpPts(&o_mesh);
   oh::elevate_curve_order_2to3(&o_mesh);
+  o_mesh.add_tag<oh::Real>(0, "bezier_pts", o_mesh.dim(), o_mesh.coords());
+  
+  if (o_mesh.is_curved() > 0) {
+    auto cubic_curveVtk = oh::Mesh(o_mesh.comm()->library());
+    cubic_curveVtk.set_comm(lib.world());
+    build_cubic_curveVtk_3d(&o_mesh, &cubic_curveVtk, 5);
+    std::string vtuPath = "/lore/joshia5/Meshes/curved/incl_ini_curveVtk.vtu";
+    vtuPath += to_string(myid);
+    oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_curveVtk, 2);
+    auto cubic_wireframe = oh::Mesh(o_mesh.comm()->library());
+    cubic_wireframe.set_comm(lib.world());
+    build_cubic_wireframe_3d(&o_mesh, &cubic_wireframe, 5);
+    vtuPath = "/lore/joshia5/Meshes/curved/incl_ini_wireframe.vtu";
+    vtuPath += to_string(myid);
+    oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_wireframe, 1);
+  }
+
 
   double error_des = 0.0;
 
@@ -146,9 +169,6 @@ int main(int argc, char *argv[]) {
     //int inclusion_regions[1] = {92};
     double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
     double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
-    bool isAmr = false;
-
-
 
     // Parse command-line options.
     const char *mesh_file = "";
@@ -196,7 +216,13 @@ int main(int argc, char *argv[]) {
       args.PrintOptions(cout);
     }
 
-    ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
+    printf("ok 202\n");
+    Mesh *mesh = new OmegaMesh (&o_mesh);
+    printf("ok 204\n");
+    ParMesh *pmesh = new ParMesh (MPI_COMM_WORLD, *mesh);
+    printf("ok 204\n");
+    //ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
+    cout << "is NC" << pmesh->Nonconforming();
 
     int dim = pmesh->SpaceDimension();
 
@@ -205,11 +231,8 @@ int main(int argc, char *argv[]) {
       cout << "Starting initialization." << endl;
     }
 
-    // Define a parallel mesh by a partitioning of the serial mesh. Refine
-    // this mesh further in parallel to increase the resolution. Once the
-    // parallel mesh is defined, the serial mesh can be deleted.
-
-    pmesh->Finalize(true);
+    //pmesh->Finalize(true);
+    printf("finalize ok\n");
 
     // Create a coefficient describing the dielectric permittivity
     Coefficient * epsCoef =
@@ -223,7 +246,9 @@ int main(int argc, char *argv[]) {
     // provided by the function phi_bc_uniform(x).
 
     // Create the Electrostatic solver
+    printf("ok 225\n");
     InclusionSolver Inclusion(*pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
+    printf("ok 227\n");
 
     // Initialize GLVis visualization
     if (visualization)
@@ -231,11 +256,11 @@ int main(int argc, char *argv[]) {
       Inclusion.InitializeGLVis();
     }
 
-    // Initialize VisIt visualization
-    VisItDataCollection visit_dc("Inclusion-AMR-Parallel", pmesh);
 
     if ( visit )
     {
+      // Initialize VisIt visualization
+      VisItDataCollection visit_dc("Inclusion-AMR-Parallel", pmesh);
       Inclusion.RegisterVisItFields(visit_dc);
     }
     if (mpi.Root()) { cout << "Initialization done." << endl; }
@@ -248,143 +273,173 @@ int main(int argc, char *argv[]) {
     const int max_dofs = 10000000;
     int it = 1;
 
-      // Display the current number of DoFs in each finite element space
-      Inclusion.PrintSizes();
+    // Display the current number of DoFs in each finite element space
+    printf("ok 251\n");
+    Inclusion.PrintSizes();
 
-      // Assemble all forms
-      Inclusion.Assemble();
+    // Assemble all forms
+    printf("ok 256\n");
+    Inclusion.Assemble();
 
-      // Solve the system and compute any auxiliary fields
-      Inclusion.Solve();
+    printf("ok 257\n");
+    // Solve the system and compute any auxiliary fields
+    Inclusion.Solve();
+    printf("ok 260\n");
 
-      // Determine the current size of the linear system
-      int prob_size = Inclusion.GetProblemSize();
+    // Determine the current size of the linear system
+    int prob_size = Inclusion.GetProblemSize();
 
-      // Write fields to disk for VisIt
-      if ( visit )
+    // Write fields to disk for VisIt
+    if ( visit )
+    {
+      Inclusion.WriteVisItFields(it);
+    }
+
+    // Send the solution by socket to a GLVis server.
+    if (visualization)
+    {
+      Inclusion.DisplayToGLVis();
+    }
+
+
+    // Check stopping criteria
+    if (prob_size > max_dofs)
+    {
+      if (mpi.Root())
       {
-        Inclusion.WriteVisItFields(it);
+        cout << "Reached maximum number of dofs, exiting..." << endl;
       }
+      break;
+    }
 
-      // Send the solution by socket to a GLVis server.
-      if (visualization)
-      {
-        Inclusion.DisplayToGLVis();
-      }
+    // Wait for user input. Ask every 10th iteration.
+    char c = 'c';
+    if (mpi.Root() && (it % 10 == 0))
+    {
+      cout << "press (q)uit or (c)ontinue --> " << flush;
+      cin >> c;
+    }
+    MPI_Bcast(&c, 1, MPI_CHAR, 0, MPI_COMM_WORLD);
 
+    if (c != 'c')
+    {
+      break;
+    }
 
-      // Check stopping criteria
-      if (prob_size > max_dofs)
-      {
-        if (mpi.Root())
-        {
-          cout << "Reached maximum number of dofs, exiting..." << endl;
-        }
-        break;
-      }
+    Vector errors(pmesh->GetNE());
+    Inclusion.GetErrorEstimates(errors);
+    
+    // adapt
+    char Fname[128];
+    sprintf(Fname,
+        "inclusion_1x1_crv.vtk");
+    char iter_str[8];
+    sprintf(iter_str, "_%d", Itr);
+    strcat(Fname, iter_str);
+    puts(Fname);
 
-      // Wait for user input. Ask every 10th iteration.
-      char c = 'c';
-      if (mpi.Root() && (it % 10 == 0))
-      {
-        cout << "press (q)uit or (c)ontinue --> " << flush;
-        cin >> c;
-      }
-      MPI_Bcast(&c, 1, MPI_CHAR, 0, MPI_COMM_WORLD);
+    ParOmegaMesh* pOmesh = dynamic_cast<ParOmegaMesh*>(pmesh);
+    pOmesh->ElementFieldMFEMtoOmegaH (&o_mesh, errors, dim, "zz_error");
 
-      if (c != 'c')
-      {
-        break;
-      }
+    for (int i = 0; i < pmesh->GetNE(); i++) {
+      //printf("elem %d , vol %1.10f, err %1.10f\n", i,pmesh->GetElementVolume(i),errors[i]); 
+    }
+    double local_max_err = errors.Max();
+    double local_min_err = errors.Min();
+    //printf("before adapt run case error max %1.10f error min %1.10f \n",
+    //  local_max_err, local_min_err);
+    double global_max_err;
+    MPI_Allreduce(&local_max_err, &global_max_err, 1,
+        MPI_DOUBLE, MPI_MAX, pmesh->GetComm());
 
-      Vector errors(pmesh->GetNE());
-      Inclusion.GetErrorEstimates(errors);
-      if (isAmr)
-      {
-        // Estimate element errors using the Zienkiewicz-Zhu error estimator.
+    double global_min_err;
+    MPI_Allreduce(&local_min_err, &global_min_err, 1,
+        MPI_DOUBLE, MPI_MIN, pmesh->GetComm());
 
-        double local_max_err = errors.Max();
-        double global_max_err;
-        MPI_Allreduce(&local_max_err, &global_max_err, 1,
-            MPI_DOUBLE, MPI_MAX, pmesh->GetComm());
+    double errorVol_tot_loc = 0.0;
+    double error_tot_loc = 0.0;
+    double vol_tot_loc = 0.0;
+    for (int i = 0; i < pmesh->GetNE(); i++) {
+      auto vol_loc = pmesh->GetElementVolume(i);
+      vol_tot_loc += vol_loc;
+      errorVol_tot_loc += errors[i]*vol_loc;
+      error_tot_loc += errors[i];
+    }
+    double vol_tot;
+    double errorVol_tot;
+    double error_tot;
+    MPI_Allreduce(&vol_tot_loc, &vol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&errorVol_tot_loc, &errorVol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&error_tot_loc, &error_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    double error_bar = errorVol_tot/vol_tot;
+    const double frac = 0.99999999999999;
+    if (Itr == 0) error_des = frac*error_bar;
 
-        // Refine the elements whose error is larger than a fraction of the
-        // maximum element error.
-        const double frac = 0.7;
-        double threshold = frac * global_max_err;
-        if (mpi.Root()) { cout << "Refining ..." << endl; }
-        pmesh->RefineByError(errors, threshold);
-      }
-      // adapt
-      char Fname[128];
-      sprintf(Fname,
-          "inclusion_1x1_crv.vtk");
-      char iter_str[8];
-      sprintf(iter_str, "_%d", Itr);
-      strcat(Fname, iter_str);
-      puts(Fname);
+    printf("before adapt run case error max %1.10f error min %1.19f error_bar %1.10f error_des %1.10f\n",
+        global_max_err, global_min_err, error_bar, error_des);
+    //if (error_bar < error_des) break;
 
-      ParOmegaMesh* pOmesh = dynamic_cast<ParOmegaMesh*>(pmesh);
-      pOmesh->ElementFieldMFEMtoOmegaH (&o_mesh, errors, dim, "zz_error");
+    stringstream ss;
+    ss << "inclusion_iter_" << Itr;
+    printf("before vtk\n");
+    //Inclusion.WriteToVtk(ss.str().c_str());
+    printf("after vtk\n");
 
-      for (int i = 0; i < pmesh->GetNE(); i++) {
-        //printf("elem %d , vol %1.10f, err %1.10f\n", i,pmesh->GetElementVolume(i),errors[i]); 
-      }
-      double local_max_err = errors.Max();
-      double local_min_err = errors.Min();
-      //printf("before adapt run case error max %1.10f error min %1.10f \n",
-        //  local_max_err, local_min_err);
-      double global_max_err;
-      MPI_Allreduce(&local_max_err, &global_max_err, 1,
-          MPI_DOUBLE, MPI_MAX, pmesh->GetComm());
+    if (global_max_err < error_des) {
+      oh::vtk::write_parallel("before_break", &o_mesh);
+      cout << "converged\n";
+      break;
+    }
+    
+    {
+      GridFunction *nodes = pmesh->GetNodes();
+      ofstream mesh_ofs("1x1_crv.mesh");
+      mesh_ofs.precision(8);
+      pmesh->Print(mesh_ofs);
+      ofstream nodes_ofs("nodes.gf");
+      nodes_ofs.precision(8);
+      nodes->Save(nodes_ofs);
+    }
 
-      double global_min_err;
-      MPI_Allreduce(&local_min_err, &global_min_err, 1,
-          MPI_DOUBLE, MPI_MIN, pmesh->GetComm());
+    if (o_mesh.is_curved() > 0) {
+      auto cubic_curveVtk = oh::Mesh(o_mesh.comm()->library());
+      cubic_curveVtk.set_comm(lib.world());
+      build_cubic_curveVtk_3d(&o_mesh, &cubic_curveVtk, 5);
+      std::string vtuPath = "/lore/joshia5/Meshes/curved/incl_bef_curveVtk.vtu";
+      vtuPath += myid;
+      oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_curveVtk, 2);
+      auto cubic_wireframe = oh::Mesh(o_mesh.comm()->library());
+      cubic_wireframe.set_comm(lib.world());
+      build_cubic_wireframe_3d(&o_mesh, &cubic_wireframe, 5);
+      vtuPath = "/lore/joshia5/Meshes/curved/incl_bef_wireframe.vtu";
+      vtuPath += myid;
+      oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_wireframe, 1);
+    }
 
-      double errorVol_tot_loc = 0.0;
-      double error_tot_loc = 0.0;
-      double vol_tot_loc = 0.0;
-      for (int i = 0; i < pmesh->GetNE(); i++) {
-        auto vol_loc = pmesh->GetElementVolume(i);
-        vol_tot_loc += vol_loc;
-        errorVol_tot_loc += errors[i]*vol_loc;
-        error_tot_loc += errors[i];
-      }
-      double vol_tot;
-      double errorVol_tot;
-      double error_tot;
-      MPI_Allreduce(&vol_tot_loc, &vol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-      MPI_Allreduce(&errorVol_tot_loc, &errorVol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-      MPI_Allreduce(&error_tot_loc, &error_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-      double error_bar = errorVol_tot/vol_tot;
-      const double frac = 0.1;
-      if (Itr == 0) error_des = frac*error_bar;
+    if (Itr < max_iter) {
+      run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh, error_des);
+    }
 
-      printf("before adapt run case error max %1.10f error min %1.19f error_bar %1.10f error_des %1.10f\n",
-          global_max_err, global_min_err, error_bar, error_des);
-      //if (error_bar < error_des) break;
-
-      stringstream ss;
-      ss << "inclusion_iter_" << Itr;
-      Inclusion.WriteToVtk(ss.str().c_str());
-
-      if (global_max_err < error_des) {
-        oh::vtk::write_parallel("before_break", &o_mesh);
-        cout << "converged\n";
-        break;
-      }
-
-      if (Itr < max_iter) run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh, error_des);
-      oh::vtk::write_parallel("after_adapt", &o_mesh);
-
-      // Update the electrostatic solver to reflect the new state of the mesh.
-      Inclusion.Update();
+    if (o_mesh.is_curved() > 0) {
+      auto cubic_curveVtk = oh::Mesh(o_mesh.comm()->library());
+      cubic_curveVtk.set_comm(lib.world());
+      build_cubic_curveVtk_3d(&o_mesh, &cubic_curveVtk, 5);
+      std::string vtuPath = "/lore/joshia5/Meshes/curved/incl_aft_curveVtk.vtu";
+      vtuPath += myid;
+      oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_curveVtk, 2);
+      auto cubic_wireframe = oh::Mesh(o_mesh.comm()->library());
+      cubic_wireframe.set_comm(lib.world());
+      build_cubic_wireframe_3d(&o_mesh, &cubic_wireframe, 5);
+      vtuPath = "/lore/joshia5/Meshes/curved/incl_aft_wireframe.vtu";
+      vtuPath += myid;
+      oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_wireframe, 1);
+    }
+    oh::vtk::write_parallel("after_adapt", &o_mesh);
 
     delete epsCoef;
   } // end iterative adaptation loop
 
-   return 0;
+  return 0;
 }
 
 // The Permittivity is a required coefficient which may be defined in
