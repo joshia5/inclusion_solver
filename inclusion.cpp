@@ -11,11 +11,13 @@
 #include <Omega_h_adapt.hpp>
 #include <Omega_h_for.hpp>
 #include <Omega_h_metric.hpp>
+#include <Omega_h_refine.hpp>
 #include <Omega_h_timer.hpp>
 #include <Omega_h_array_ops.hpp>
 #include <Omega_h_vector.hpp>
 #include <Omega_h_beziers.hpp>
 #include <Omega_h_build.hpp>
+#include <Omega_h_curve_coarsen.hpp>
 
 namespace oh = Omega_h;
 
@@ -52,12 +54,17 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
   oh::ProjectFieldtoVertex (mesh, "length_parent", 1);
   auto length_c = mesh->get_array<oh::Real> (0, "length_parent");
 
-  auto class_id = mesh->get_array<oh::LO> (0, "class_id");
+  auto v_class_id = mesh->get_array<oh::LO> (0, "class_id");
 
   auto f = OMEGA_H_LAMBDA(oh::LO v) {
     auto h = oh::Vector<dim>();
     auto vtxError = error_c[v];
     for (oh::Int i = 0; i < dim; ++i) {
+      //h[i] = 0.75*length_c[v];
+      if (v_class_id[v] == 190) {
+        printf("inclusion vert %d\n", v);
+        //h[i] = 0.75*length_c[v];
+      }
       h[i] = std::pow((error_des2/vtxError), 0.5)*length_c[v];
       hd_hc[v] = h[i]/length_c[v];
     }
@@ -92,14 +99,16 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   opts.should_coarsen = false;
   opts.should_coarsen_slivers = false;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
-  opts.min_quality_allowed = 1e-15;
-  opts.min_quality_desired = 0.2;
-  opts.max_length_allowed = 4.5*opts.max_length_desired;
+  opts.min_quality_allowed = 0.01;
+  //opts.min_quality_desired = 0.1;
+  //opts.max_length_allowed = 4.0*opts.max_length_desired;
   oh::Now t0 = oh::now();
   
-  while (approach_metric(mesh, opts)) {
-    printf("approach metric\n");
-    adapt(mesh, opts);
+  for (int itr=0; itr<1; ++itr) {
+  //while (approach_metric(mesh, opts)) {
+    printf("approach metric %d\n",approach_metric(mesh, opts));
+    refine_by_size(mesh, opts);
+    //adapt(mesh, opts);
     if (vtk_path) {
       writer.write();
     }
@@ -130,14 +139,14 @@ int main(int argc, char *argv[]) {
   // Read Omega_h mesh
   auto lib = oh::Library();
   oh::Mesh o_mesh(&lib);
-  oh::binary::read ("../meshes/setup_1x1_crv.osh",
-  //oh::binary::read ("../meshes/setup_1x1_crv_2p.osh",
-      lib.world(), &o_mesh);
+  oh::binary::read ("../meshes/setup_1x1_crv-coarse.osh", lib.world(), &o_mesh);
   oh::calc_quad_ctrlPts_from_interpPts(&o_mesh);
   oh::elevate_curve_order_2to3(&o_mesh);
   o_mesh.add_tag<oh::Real>(0, "bezier_pts", o_mesh.dim(), o_mesh.coords());
   
   if (o_mesh.is_curved() > 0) {
+    printf("checking validity of initial mesh\n");
+    check_validity_all_tet(&o_mesh);
     auto cubic_curveVtk = oh::Mesh(o_mesh.comm()->library());
     cubic_curveVtk.set_comm(lib.world());
     build_cubic_curveVtk_3d(&o_mesh, &cubic_curveVtk, 5);
@@ -152,70 +161,69 @@ int main(int argc, char *argv[]) {
     oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_wireframe, 1);
   }
 
-
   double error_des = 0.0;
 
   //number of adaptation iterations
-  int max_iter = 1;
-  for (int Itr = 0; Itr < max_iter; Itr++)  {
+  int max_iter = 2;
 
-    // problem constants and attribute and bdr attribute lists corresponding
-    // to different regions and boundaries of the problem
-    // NOTE: the list containing model tags are model dependent
-    double kappa = 2.; // relative permittivity of phase 2 wrt vacuum
-    //int num_substrate = 1; // number of regions in the substrate phase (1)
-    //int num_inclusion = 1; // number of regions in the inclusion phase (2)
-    //int substrate_regions[1] = {186};
-    //int inclusion_regions[1] = {92};
-    double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
-    double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
+  // problem constants and attribute and bdr attribute lists corresponding
+  // to different regions and boundaries of the problem
+  // NOTE: the list containing model tags are model dependent
+  double kappa = 2.; // relative permittivity of phase 2 wrt vacuum
+  //int num_substrate = 1; // number of regions in the substrate phase (1)
+  //int num_inclusion = 1; // number of regions in the inclusion phase (2)
+  //int substrate_regions[1] = {186};
+  //int inclusion_regions[1] = {92};
+  double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
+  double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
 
-    // Parse command-line options.
-    const char *mesh_file = "";
-    int order = o_mesh.get_max_order();
-    int maxit = 1;
-    bool visualization = false;
-    bool visit = false;
+  // Parse command-line options.
+  const char *mesh_file = "";
+  int order = o_mesh.get_max_order();
+  int maxit = 1;
+  bool visualization = false;
+  bool visit = false;
 
-    Array<int> dbcs;
-    Array<int> phase1; // list of model regions containing the phase 1 dielectric
-    Array<int> phase2; // list of model regions containing the phase 2 dielectric
+  Array<int> dbcs;
+  Array<int> phase1; // list of model regions containing the phase 1 dielectric
+  Array<int> phase2; // list of model regions containing the phase 2 dielectric
 
 
-    OptionsParser args(argc, argv);
-    args.AddOption(&mesh_file, "-m", "--mesh",
-        "Mesh file to use.");
-    args.AddOption(&order, "-o", "--order",
-        "Finite element order (polynomial degree).");
-    args.AddOption(&phase1, "-s", "--substrate",
-        "List of Model Regions Containing Phase 1 (Substrate).");
-    args.AddOption(&phase2, "-i", "--inclusion",
-        "List of Model Regions Containing Phase 2 (Inclusion).");
-    args.AddOption(&kappa, "-k", "--kappa",
-        "Relative permittivity phase 2.");
-    args.AddOption(&dbcs, "-dbcs", "--dirichlet-bc-surf",
-        "Dirichlet Boundary Condition Surfaces");
-    args.AddOption(&maxit, "-maxit", "--max-amr-iterations",
-        "Max number of iterations in the main AMR loop.");
-    args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
-        "--no-visualization",
-        "Enable or disable GLVis visualization.");
-    args.AddOption(&visit, "-visit", "--visit", "-no-visit", "--no-visit",
-        "Enable or disable VisIt visualization.");
-    args.Parse();
-    if (!args.Good())
-    {
-      if (mpi.Root())
-      {
-        args.PrintUsage(cout);
-      }
-      return 1;
-    }
+  OptionsParser args(argc, argv);
+  args.AddOption(&mesh_file, "-m", "--mesh",
+      "Mesh file to use.");
+  args.AddOption(&order, "-o", "--order",
+      "Finite element order (polynomial degree).");
+  args.AddOption(&phase1, "-s", "--substrate",
+      "List of Model Regions Containing Phase 1 (Substrate).");
+  args.AddOption(&phase2, "-i", "--inclusion",
+      "List of Model Regions Containing Phase 2 (Inclusion).");
+  args.AddOption(&kappa, "-k", "--kappa",
+      "Relative permittivity phase 2.");
+  args.AddOption(&dbcs, "-dbcs", "--dirichlet-bc-surf",
+      "Dirichlet Boundary Condition Surfaces");
+  args.AddOption(&maxit, "-maxit", "--max-amr-iterations",
+      "Max number of iterations in the main AMR loop.");
+  args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
+      "--no-visualization",
+      "Enable or disable GLVis visualization.");
+  args.AddOption(&visit, "-visit", "--visit", "-no-visit", "--no-visit",
+      "Enable or disable VisIt visualization.");
+  args.Parse();
+  if (!args.Good())
+  {
     if (mpi.Root())
     {
-      args.PrintOptions(cout);
+      args.PrintUsage(cout);
     }
+    return 1;
+  }
+  if (mpi.Root())
+  {
+    args.PrintOptions(cout);
+  }
 
+  for (int Itr = 0; Itr < max_iter; Itr++)  {
     printf("ok 202\n");
     Mesh *mesh = new OmegaMesh (&o_mesh);
     printf("ok 204\n");
@@ -265,14 +273,7 @@ int main(int argc, char *argv[]) {
     }
     if (mpi.Root()) { cout << "Initialization done." << endl; }
 
-    // The main AMR loop. In each iteration we solve the problem on the current
-    // mesh, visualize the solution, estimate the error on all elements, refine
-    // the worst elements and update all objects to work with the new mesh.  We
-    // refine until the maximum number of dofs in the nodal finite element space
-    // reaches 10 million.
-    const int max_dofs = 10000000;
     int it = 1;
-
     // Display the current number of DoFs in each finite element space
     printf("ok 251\n");
     Inclusion.PrintSizes();
@@ -299,31 +300,6 @@ int main(int argc, char *argv[]) {
     if (visualization)
     {
       Inclusion.DisplayToGLVis();
-    }
-
-
-    // Check stopping criteria
-    if (prob_size > max_dofs)
-    {
-      if (mpi.Root())
-      {
-        cout << "Reached maximum number of dofs, exiting..." << endl;
-      }
-      break;
-    }
-
-    // Wait for user input. Ask every 10th iteration.
-    char c = 'c';
-    if (mpi.Root() && (it % 10 == 0))
-    {
-      cout << "press (q)uit or (c)ontinue --> " << flush;
-      cin >> c;
-    }
-    MPI_Bcast(&c, 1, MPI_CHAR, 0, MPI_COMM_WORLD);
-
-    if (c != 'c')
-    {
-      break;
     }
 
     Vector errors(pmesh->GetNE());
@@ -372,7 +348,8 @@ int main(int argc, char *argv[]) {
     MPI_Allreduce(&errorVol_tot_loc, &errorVol_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(&error_tot_loc, &error_tot, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     double error_bar = errorVol_tot/vol_tot;
-    const double frac = 0.99999999999999;
+    //const double frac = 40;
+    const double frac = 0.9;
     if (Itr == 0) error_des = frac*error_bar;
 
     printf("before adapt run case error max %1.10f error min %1.19f error_bar %1.10f error_des %1.10f\n",
@@ -381,9 +358,7 @@ int main(int argc, char *argv[]) {
 
     stringstream ss;
     ss << "inclusion_iter_" << Itr;
-    printf("before vtk\n");
-    //Inclusion.WriteToVtk(ss.str().c_str());
-    printf("after vtk\n");
+    Inclusion.WriteToVtk(ss.str().c_str());
 
     if (global_max_err < error_des) {
       oh::vtk::write_parallel("before_break", &o_mesh);
@@ -392,13 +367,16 @@ int main(int argc, char *argv[]) {
     }
     
     {
-      GridFunction *nodes = pmesh->GetNodes();
       ofstream mesh_ofs("1x1_crv.mesh");
       mesh_ofs.precision(8);
       pmesh->Print(mesh_ofs);
+      GridFunction *nodes = pmesh->GetNodes();
       ofstream nodes_ofs("nodes.gf");
       nodes_ofs.precision(8);
       nodes->Save(nodes_ofs);
+      ofstream eField_ofs("eField.gf");
+      eField_ofs.precision(8);
+      Inclusion.e_->Save(eField_ofs);
     }
 
     if (o_mesh.is_curved() > 0) {
@@ -406,19 +384,18 @@ int main(int argc, char *argv[]) {
       cubic_curveVtk.set_comm(lib.world());
       build_cubic_curveVtk_3d(&o_mesh, &cubic_curveVtk, 5);
       std::string vtuPath = "/lore/joshia5/Meshes/curved/incl_bef_curveVtk.vtu";
-      vtuPath += myid;
       oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_curveVtk, 2);
       auto cubic_wireframe = oh::Mesh(o_mesh.comm()->library());
       cubic_wireframe.set_comm(lib.world());
       build_cubic_wireframe_3d(&o_mesh, &cubic_wireframe, 5);
       vtuPath = "/lore/joshia5/Meshes/curved/incl_bef_wireframe.vtu";
-      vtuPath += myid;
       oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_wireframe, 1);
     }
 
-    if (Itr < max_iter) {
+    if (Itr+1 < max_iter) {
       run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh, error_des);
     }
+    Inclusion.Update();
 
     if (o_mesh.is_curved() > 0) {
       auto cubic_curveVtk = oh::Mesh(o_mesh.comm()->library());
@@ -437,6 +414,8 @@ int main(int argc, char *argv[]) {
     oh::vtk::write_parallel("after_adapt", &o_mesh);
 
     delete epsCoef;
+    delete mesh;
+    delete pmesh;
   } // end iterative adaptation loop
 
   return 0;

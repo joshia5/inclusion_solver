@@ -51,6 +51,7 @@ public:
 
    void WriteToVtk(const char* name, int res=1);
 
+   ParGridFunction * e_;         // Electric Field
 private:
 
    int myid_;      // Local processor rank
@@ -87,7 +88,7 @@ private:
 
    ParGridFunction * phi_;       // Electric Scalar Potential
    ParGridFunction * rho_;       // Volumetric Charge Density (Div(D))
-   ParGridFunction * e_;         // Electric Field
+   //ParGridFunction * e_;         // Electric Field
    ParGridFunction * d_;         // Electric Flux Density (aka Dielectric Flux)
 
    ConstantCoefficient oneCoef_;   // Coefficient equal to 1
