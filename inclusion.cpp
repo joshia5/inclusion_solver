@@ -11,7 +11,6 @@
 #include <Omega_h_adapt.hpp>
 #include <Omega_h_for.hpp>
 #include <Omega_h_metric.hpp>
-#include <Omega_h_refine.hpp>
 #include <Omega_h_timer.hpp>
 #include <Omega_h_array_ops.hpp>
 #include <Omega_h_vector.hpp>
@@ -60,12 +59,11 @@ static void set_target_metric(oh::Mesh* mesh, oh::Int scale, ParOmegaMesh
     auto h = oh::Vector<dim>();
     auto vtxError = error_c[v];
     for (oh::Int i = 0; i < dim; ++i) {
-      //h[i] = 0.75*length_c[v];
-      if (v_class_id[v] == 190) {
-        printf("inclusion vert %d\n", v);
-        //h[i] = 0.75*length_c[v];
-      }
       h[i] = std::pow((error_des2/vtxError), 0.5)*length_c[v];
+      if ((v_class_id[v] == 190) ||  (v_class_id[v] == 186)) {
+        h[i] = length_c[v];
+        //printf("inclusion vert %d\n", v);
+      }
       hd_hc[v] = h[i]/length_c[v];
     }
     auto m = diagonal(metric_eigenvalues_from_lengths(h));
@@ -104,11 +102,10 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   //opts.max_length_allowed = 4.0*opts.max_length_desired;
   oh::Now t0 = oh::now();
   
-  for (int itr=0; itr<1; ++itr) {
+  for (int itr=0; itr<3; ++itr) {
   //while (approach_metric(mesh, opts)) {
     printf("approach metric %d\n",approach_metric(mesh, opts));
-    refine_by_size(mesh, opts);
-    //adapt(mesh, opts);
+    adapt(mesh, opts);
     if (vtk_path) {
       writer.write();
     }
@@ -116,7 +113,7 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   
   //adapt(mesh, opts);
   oh::Now t1 = oh::now();
-  if (!myid) std::cout << "total time: " << (t1 - t0) << " seconds\n";
+  if (!myid) std::cout << "total adapt time: " << (t1 - t0) << " seconds\n";
 
 }
 
@@ -139,12 +136,14 @@ int main(int argc, char *argv[]) {
   // Read Omega_h mesh
   auto lib = oh::Library();
   oh::Mesh o_mesh(&lib);
+  //oh::binary::read ("../meshes/setup_1x1_3mil.osh", lib.world(), &o_mesh);
   oh::binary::read ("../meshes/setup_1x1_crv-coarse.osh", lib.world(), &o_mesh);
-  oh::calc_quad_ctrlPts_from_interpPts(&o_mesh);
-  oh::elevate_curve_order_2to3(&o_mesh);
-  o_mesh.add_tag<oh::Real>(0, "bezier_pts", o_mesh.dim(), o_mesh.coords());
   
   if (o_mesh.is_curved() > 0) {
+    printf("elevating to order 3\n");
+    oh::calc_quad_ctrlPts_from_interpPts(&o_mesh);
+    oh::elevate_curve_order_2to3(&o_mesh);
+    o_mesh.add_tag<oh::Real>(0, "bezier_pts", o_mesh.dim(), o_mesh.coords());
     printf("checking validity of initial mesh\n");
     check_validity_all_tet(&o_mesh);
     auto cubic_curveVtk = oh::Mesh(o_mesh.comm()->library());
@@ -163,21 +162,13 @@ int main(int argc, char *argv[]) {
 
   double error_des = 0.0;
 
-  //number of adaptation iterations
   int max_iter = 2;
 
-  // problem constants and attribute and bdr attribute lists corresponding
-  // to different regions and boundaries of the problem
   // NOTE: the list containing model tags are model dependent
   double kappa = 2.; // relative permittivity of phase 2 wrt vacuum
-  //int num_substrate = 1; // number of regions in the substrate phase (1)
-  //int num_inclusion = 1; // number of regions in the inclusion phase (2)
-  //int substrate_regions[1] = {186};
-  //int inclusion_regions[1] = {92};
   double epsilon1 = epsilon0_; // permittivity of substrate phase (1)
   double epsilon2 = kappa * epsilon0_; // permittivity of inclusion phase (2)
 
-  // Parse command-line options.
   const char *mesh_file = "";
   int order = o_mesh.get_max_order();
   int maxit = 1;
@@ -210,39 +201,30 @@ int main(int argc, char *argv[]) {
   args.AddOption(&visit, "-visit", "--visit", "-no-visit", "--no-visit",
       "Enable or disable VisIt visualization.");
   args.Parse();
-  if (!args.Good())
-  {
-    if (mpi.Root())
-    {
+  if (!args.Good()) {
+    if (mpi.Root()) {
       args.PrintUsage(cout);
     }
     return 1;
   }
-  if (mpi.Root())
-  {
+  if (mpi.Root()) {
     args.PrintOptions(cout);
   }
 
   for (int Itr = 0; Itr < max_iter; Itr++)  {
-    printf("ok 202\n");
     Mesh *mesh = new OmegaMesh (&o_mesh);
-    printf("ok 204\n");
     ParMesh *pmesh = new ParMesh (MPI_COMM_WORLD, *mesh);
-    printf("ok 204\n");
     //ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
     cout << "is NC" << pmesh->Nonconforming();
 
     int dim = pmesh->SpaceDimension();
 
-    if (mpi.Root())
-    {
+    if (mpi.Root()) {
       cout << "Starting initialization." << endl;
     }
 
-    //pmesh->Finalize(true);
-    printf("finalize ok\n");
-
     // Create a coefficient describing the dielectric permittivity
+    oh::Now t0 = oh::now();
     Coefficient * epsCoef =
       SetupPermittivityCoefficient(pmesh->attributes.Max(),
           epsilon1, epsilon2, phase1, phase2);
@@ -254,19 +236,13 @@ int main(int argc, char *argv[]) {
     // provided by the function phi_bc_uniform(x).
 
     // Create the Electrostatic solver
-    printf("ok 225\n");
     InclusionSolver Inclusion(*pmesh, order, dbcs, *epsCoef, phi_bc_uniform);
-    printf("ok 227\n");
 
     // Initialize GLVis visualization
-    if (visualization)
-    {
+    if (visualization) {
       Inclusion.InitializeGLVis();
     }
-
-
-    if ( visit )
-    {
+    if ( visit ) {
       // Initialize VisIt visualization
       VisItDataCollection visit_dc("Inclusion-AMR-Parallel", pmesh);
       Inclusion.RegisterVisItFields(visit_dc);
@@ -275,30 +251,27 @@ int main(int argc, char *argv[]) {
 
     int it = 1;
     // Display the current number of DoFs in each finite element space
-    printf("ok 251\n");
     Inclusion.PrintSizes();
 
     // Assemble all forms
-    printf("ok 256\n");
     Inclusion.Assemble();
 
-    printf("ok 257\n");
     // Solve the system and compute any auxiliary fields
     Inclusion.Solve();
-    printf("ok 260\n");
+
+    oh::Now t1 = oh::now();
+    if (!myid) std::cout << "total solve time: " << (t1 - t0) << " seconds\n";
 
     // Determine the current size of the linear system
     int prob_size = Inclusion.GetProblemSize();
 
     // Write fields to disk for VisIt
-    if ( visit )
-    {
+    if ( visit ) {
       Inclusion.WriteVisItFields(it);
     }
 
     // Send the solution by socket to a GLVis server.
-    if (visualization)
-    {
+    if (visualization) {
       Inclusion.DisplayToGLVis();
     }
 
@@ -352,8 +325,8 @@ int main(int argc, char *argv[]) {
     const double frac = 0.9;
     if (Itr == 0) error_des = frac*error_bar;
 
-    printf("before adapt run case error max %1.10f error min %1.19f error_bar %1.10f error_des %1.10f\n",
-        global_max_err, global_min_err, error_bar, error_des);
+    printf("Itr %d error tot %1.10f error_bar %1.15f #tet %d tot_vol %1.10f\n",
+        Itr, error_tot, error_bar, mesh->GetNE(), vol_tot);
     //if (error_bar < error_des) break;
 
     stringstream ss;
@@ -367,19 +340,28 @@ int main(int argc, char *argv[]) {
     }
     
     {
-      ofstream mesh_ofs("1x1_crv.mesh");
+      std::string mesh_path = "1x1_crv_";
+      mesh_path += std::to_string(3);
+      mesh_path += ".mesh";
+      ofstream mesh_ofs(mesh_path);
       mesh_ofs.precision(8);
       pmesh->Print(mesh_ofs);
+      std::string gf_path = "eField_";
+      gf_path += std::to_string(3);
+      gf_path += ".gf";
+      ofstream eField_ofs(gf_path);
+      eField_ofs.precision(8);
+      Inclusion.e_->Save(eField_ofs);
+    }
+    /*
+    */
+
+    if (o_mesh.is_curved() > 0) {
       GridFunction *nodes = pmesh->GetNodes();
       ofstream nodes_ofs("nodes.gf");
       nodes_ofs.precision(8);
       nodes->Save(nodes_ofs);
-      ofstream eField_ofs("eField.gf");
-      eField_ofs.precision(8);
-      Inclusion.e_->Save(eField_ofs);
-    }
 
-    if (o_mesh.is_curved() > 0) {
       auto cubic_curveVtk = oh::Mesh(o_mesh.comm()->library());
       cubic_curveVtk.set_comm(lib.world());
       build_cubic_curveVtk_3d(&o_mesh, &cubic_curveVtk, 5);
@@ -395,7 +377,6 @@ int main(int argc, char *argv[]) {
     if (Itr+1 < max_iter) {
       run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh, error_des);
     }
-    Inclusion.Update();
 
     if (o_mesh.is_curved() > 0) {
       auto cubic_curveVtk = oh::Mesh(o_mesh.comm()->library());
