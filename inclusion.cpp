@@ -94,15 +94,16 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   }
   auto opts = oh::AdaptOpts(mesh);
   opts.should_swap = false;
-  opts.should_coarsen = false;
-  opts.should_coarsen_slivers = false;
+  opts.should_filter_invalids = -1;
+  //opts.should_coarsen = false;
+  //opts.should_coarsen_slivers = false;
   opts.xfer_opts.type_map["zz_error"] = OMEGA_H_POINTWISE;
   opts.min_quality_allowed = 0.01;
   //opts.min_quality_desired = 0.1;
   //opts.max_length_allowed = 4.0*opts.max_length_desired;
   oh::Now t0 = oh::now();
-  
-  for (int itr=0; itr<3; ++itr) {
+ 
+  for (int itr=0; itr<1; ++itr) {
   //while (approach_metric(mesh, opts)) {
     printf("approach metric %d\n",approach_metric(mesh, opts));
     adapt(mesh, opts);
@@ -110,7 +111,7 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
       writer.write();
     }
   }
-  
+ 
   //adapt(mesh, opts);
   oh::Now t1 = oh::now();
   if (!myid) std::cout << "total adapt time: " << (t1 - t0) << " seconds\n";
@@ -160,6 +161,9 @@ int main(int argc, char *argv[]) {
     oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_wireframe, 1);
   }
 
+  //Device device("cuda");
+  //has very little effect, can be default for cuda build
+  //device.Print();
   double error_des = 0.0;
 
   int max_iter = 2;
@@ -173,7 +177,6 @@ int main(int argc, char *argv[]) {
   int order = o_mesh.get_max_order();
   int maxit = 1;
   bool visualization = false;
-  bool visit = false;
 
   Array<int> dbcs;
   Array<int> phase1; // list of model regions containing the phase 1 dielectric
@@ -193,13 +196,9 @@ int main(int argc, char *argv[]) {
       "Relative permittivity phase 2.");
   args.AddOption(&dbcs, "-dbcs", "--dirichlet-bc-surf",
       "Dirichlet Boundary Condition Surfaces");
-  args.AddOption(&maxit, "-maxit", "--max-amr-iterations",
-      "Max number of iterations in the main AMR loop.");
   args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
       "--no-visualization",
       "Enable or disable GLVis visualization.");
-  args.AddOption(&visit, "-visit", "--visit", "-no-visit", "--no-visit",
-      "Enable or disable VisIt visualization.");
   args.Parse();
   if (!args.Good()) {
     if (mpi.Root()) {
@@ -242,11 +241,7 @@ int main(int argc, char *argv[]) {
     if (visualization) {
       Inclusion.InitializeGLVis();
     }
-    if ( visit ) {
-      // Initialize VisIt visualization
-      VisItDataCollection visit_dc("Inclusion-AMR-Parallel", pmesh);
-      Inclusion.RegisterVisItFields(visit_dc);
-    }
+
     if (mpi.Root()) { cout << "Initialization done." << endl; }
 
     int it = 1;
@@ -264,11 +259,6 @@ int main(int argc, char *argv[]) {
 
     // Determine the current size of the linear system
     int prob_size = Inclusion.GetProblemSize();
-
-    // Write fields to disk for VisIt
-    if ( visit ) {
-      Inclusion.WriteVisItFields(it);
-    }
 
     // Send the solution by socket to a GLVis server.
     if (visualization) {
