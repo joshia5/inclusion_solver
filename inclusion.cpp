@@ -368,11 +368,12 @@ int main(int argc, char *argv[]) {
     }
     else {
       fprintf(stderr, "calling TMOP\n");
+      oh::Now t0 = oh::now();
       {
         //Set inputs as per the 3D untangling case
         int mesh_poly_deg     = 3;
         int metric_id = 313;
-        int target_id         = 1;
+        //int target_id         = 1;//not referenced
         double solver_rtol    = 1e-5;
         int max_lin_iter      = 50;
         int quad_order        = 4;
@@ -399,6 +400,40 @@ int main(int argc, char *argv[]) {
         bool move_bnd         = true;
         int combomet          = 0;
         bool exactaction      = false;
+        double surface_fit_const = 0.0;
+
+        // 3. Define a finite element space on the mesh-> Here we use vector finite
+        //    elements which are tensor products of quadratic finite elements. The
+        //    number of components in the vector finite element space is specified by
+        //    the last parameter of the FiniteElementSpace constructor.
+        FiniteElementCollection *fec;
+        if (mesh_poly_deg <= 0)
+        {
+          fec = new QuadraticPosFECollection;
+          mesh_poly_deg = 2;
+        }
+        else { fec = new H1_FECollection(mesh_poly_deg, dim); }
+        FiniteElementSpace *fespace = new FiniteElementSpace(mesh, fec, dim);
+
+        // 6. Get the mesh nodes (vertices and other degrees of freedom in the finite
+        //    element space) as a finite element grid function in fespace. Note that
+        //    changing x automatically changes the shapes of the mesh elements.
+        GridFunction x(fespace);
+        mesh->SetNodalGridFunction(&x);
+
+        // 7. Define a vector representing the minimal local mesh size in the mesh
+        //    nodes. We index the nodes using the scalar version of the degrees of
+        //    freedom in fespace. Note: this is partition-dependent.
+        //
+        //    In addition, compute average mesh size and total volume.
+        Vector h0(fespace->GetNDofs());
+        h0 = infinity();
+
+        Array<int> vdofs;
+
+        // 10. Store the starting (prior to the optimization) positions.
+        GridFunction x0(fespace);
+        x0 = x;
 
         // 11. Form the integrator that uses the chosen metric and target.
         double min_detJ = -0.1;
@@ -407,7 +442,6 @@ int main(int argc, char *argv[]) {
         metric = new TMOP_Metric_313(min_detJ);
 
         TMOP_QualityMetric *h_metric = NULL;
-        
 
         /*
         TMOP_WorstCaseUntangleOptimizer_Metric::BarrierType btype;
@@ -417,14 +451,13 @@ int main(int argc, char *argv[]) {
         HessianCoefficient *adapt_coeff = NULL;
         HRHessianCoefficient *hr_adapt_coeff = NULL;
         */
-
         TMOP_QualityMetric *untangler_metric = NULL;
 
         TargetConstructor::TargetType target_t;
         TargetConstructor *target_c = NULL;
         H1_FECollection ind_fec(mesh_poly_deg, dim);
-        FiniteElementSpace ind_fes(mesh, &ind_fec);
-        FiniteElementSpace ind_fesv(mesh, &ind_fec, dim);
+        FiniteElementSpace ind_fes(pmesh, &ind_fec);
+        FiniteElementSpace ind_fesv(pmesh, &ind_fec, dim);
         GridFunction size(&ind_fes), aspr(&ind_fes), ori(&ind_fes);
         GridFunction aspr3d(&ind_fesv);
 
@@ -470,7 +503,7 @@ int main(int argc, char *argv[]) {
 
         // Limit the node movement.
         // The limiting distances can be given by a general function of space.
-        FiniteElementSpace dist_fespace(mesh, fec); // scalar space
+        FiniteElementSpace dist_fespace(pmesh, fec); // scalar space
         GridFunction dist(&dist_fespace);
         dist = 1.0;
         ConstantCoefficient lim_coeff(lim_const);
@@ -500,19 +533,13 @@ int main(int argc, char *argv[]) {
 
           tmop_integ->EnableAdaptiveLimiting(adapt_lim_gf0, adapt_lim_coeff,
               *adapt_lim_eval);
-          if (visualization)
-          {
-            socketstream vis1;
-            common::VisualizeField(vis1, "localhost", 19916, adapt_lim_gf0, "Zeta 0",
-                300, 600, 300, 300);
-          }
         }
 
         // Surface fitting.
         L2_FECollection mat_coll(0, dim);
         H1_FECollection surf_fit_fec(mesh_poly_deg, dim);
-        FiniteElementSpace surf_fit_fes(mesh, &surf_fit_fec);
-        FiniteElementSpace mat_fes(mesh, &mat_coll);
+        FiniteElementSpace surf_fit_fes(pmesh, &surf_fit_fec);
+        FiniteElementSpace mat_fes(pmesh, &mat_coll);
         GridFunction mat(&mat_fes);
         GridFunction surf_fit_mat_gf(&surf_fit_fes);
         GridFunction surf_fit_gf0(&surf_fit_fes);
@@ -529,10 +556,10 @@ int main(int argc, char *argv[]) {
           FunctionCoefficient ls_coeff(surface_level_set);
           surf_fit_gf0.ProjectCoefficient(ls_coeff);
 
-          for (int i = 0; i < mesh->GetNE(); i++)
+          for (int i = 0; i < pmesh->GetNE(); i++)
           {
             mat(i) = material_id(i, surf_fit_gf0);
-            mesh->SetAttribute(i, static_cast<int>(mat(i) + 1));
+            pmesh->SetAttribute(i, static_cast<int>(mat(i) + 1));
           }
 
           GridFunctionCoefficient mat_coeff(&mat);
@@ -564,17 +591,6 @@ int main(int argc, char *argv[]) {
 
           tmop_integ->EnableSurfaceFitting(surf_fit_gf0, surf_fit_marker,
               surf_fit_coeff, *adapt_surface);
-          if (visualization)
-          {
-            socketstream vis1, vis2, vis3;
-            common::VisualizeField(vis1, "localhost", 19916, surf_fit_gf0, "Level Set 0",
-                300, 600, 300, 300);
-            common::VisualizeField(vis2, "localhost", 19916, mat, "Materials",
-                600, 600, 300, 300);
-            common::VisualizeField(vis3, "localhost", 19916, surf_fit_mat_gf,
-                "Dofs to Move",
-                900, 600, 300, 300);
-          }
         }
 
         // Has to be after the enabling of the limiting / alignment, as it computes
@@ -636,12 +652,12 @@ int main(int argc, char *argv[]) {
 
         // Compute the minimum det(J) of the starting mesh.
         min_detJ = infinity();
-        const int NE = mesh->GetNE();
+        const int NE = pmesh->GetNE();
         for (int i = 0; i < NE; i++)
         {
           const IntegrationRule &ir =
             irules->Get(fespace->GetFE(i)->GetGeomType(), quad_order);
-          ElementTransformation *transf = mesh->GetElementTransformation(i);
+          ElementTransformation *transf = pmesh->GetElementTransformation(i);
           for (int j = 0; j < ir.GetNPoints(); j++)
           {
             transf->SetIntPoint(&ir.IntPoint(j));
@@ -656,6 +672,7 @@ int main(int argc, char *argv[]) {
         {
           MFEM_ABORT("The input mesh is inverted! Try an untangling metric.");
         }
+        fprintf(stderr,"ok1\n");
         if (min_detJ < 0.0)
         {
           MFEM_VERIFY(target_t == TargetConstructor::IDEAL_SHAPE_UNIT_SIZE,
@@ -668,10 +685,11 @@ int main(int argc, char *argv[]) {
           // Slightly below minJ0 to avoid div by 0.
           min_detJ -= 0.01 * h0.Min();
         }
+        fprintf(stderr,"ok2\n");
 
         // For HR tests, the energy is normalized by the number of elements.
         const double init_energy = a.GetGridFunctionEnergy(x) /
-          (hradaptivity ? mesh->GetNE() : 1);
+          (hradaptivity ? pmesh->GetNE() : 1);
         //double init_metric_energy = init_energy;
         if (lim_const > 0.0 || adapt_lim_const > 0.0 || surface_fit_const > 0.0)
         {
@@ -679,19 +697,14 @@ int main(int argc, char *argv[]) {
           adapt_lim_coeff.constant = 0.0;
           surf_fit_coeff.constant   = 0.0;
           //init_metric_energy = a.GetGridFunctionEnergy(x) /
-            (hradaptivity ? mesh->GetNE() : 1);
+            (hradaptivity ? pmesh->GetNE() : 1);
           lim_coeff.constant = lim_const;
           adapt_lim_coeff.constant = adapt_lim_const;
           surf_fit_coeff.constant   = surface_fit_const;
         }
 
-        // Visualize the starting mesh and metric values.
+        fprintf(stderr,"ok3\n");
         // Note that for combinations of metrics, this only shows the first metric.
-        if (visualization)
-        {
-          char title[] = "Initial metric values";
-          vis_tmop_metric_s(mesh_poly_deg, *metric, *target_c, *mesh, title, 0);
-        }
 
         // 13. Fix all boundary nodes, or fix only a given component depending on the
         //     boundary attributes of the given mesh. Attributes 1/2/3 correspond to
@@ -840,8 +853,17 @@ int main(int argc, char *argv[]) {
         }
         hr_solver.Mult();
 
+        // 15. Save the optimized mesh to a file. This output can be viewed later
+        //     using GLVis: "glvis -m optimized.mesh".
+        {
+          ofstream mesh_ofs("optimized.mesh");
+          mesh_ofs.precision(14);
+          mesh->Print(mesh_ofs);
+        }
 
       }
+      oh::Now t1 = oh::now();
+      fprintf(stderr, "time in tmop %f\n", t1-t0);
     }
 
     if (o_mesh.is_curved() > 0) {
