@@ -139,7 +139,8 @@ int main(int argc, char *argv[]) {
   auto lib = oh::Library();
   oh::Mesh o_mesh(&lib);
   //oh::binary::read ("../meshes/setup_1x1_3mil.osh", lib.world(), &o_mesh);
-  oh::binary::read ("../meshes/setup_1x1_crv-coarse.osh", lib.world(), &o_mesh);
+  oh::binary::read ("/lore/joshia5/Meshes/curved/sphere_8.osh", lib.world(), &o_mesh);
+  //oh::binary::read ("../meshes/setup_1x1_crv-coarse.osh", lib.world(), &o_mesh);
   
   if (o_mesh.is_curved() > 0) {
     printf("elevating to order 3\n");
@@ -161,6 +162,8 @@ int main(int argc, char *argv[]) {
     vtuPath += to_string(myid);
     oh::vtk::write_simplex_connectivity(vtuPath.c_str(), &cubic_wireframe, 1);
   }
+  /*
+  */
 
   //Device device("cuda");
   //has very little effect, can be default for cuda build
@@ -214,7 +217,14 @@ int main(int argc, char *argv[]) {
     Mesh *mesh = new OmegaMesh (&o_mesh);
     ParMesh *pmesh = new ParMesh (MPI_COMM_WORLD, *mesh);
     //ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
-    cout << "is NC" << pmesh->Nonconforming();
+    {
+      cout << "is NC" << pmesh->Nonconforming();
+      std::string mesh_path = "sphere_8.mesh";
+      ofstream mesh_ofs(mesh_path);
+      mesh_ofs.precision(8);
+      pmesh->Print(mesh_ofs);
+      while(1);
+    }
 
     int dim = pmesh->SpaceDimension();
 
@@ -379,6 +389,8 @@ int main(int argc, char *argv[]) {
         int quad_order        = 4;
         bool fdscheme         = true;
         int verbosity_level   = 1;
+        //my inputs
+        bool move_bnd         = false;
         //defaults
         int barrier_type = 0;
         int worst_case_type    = 0;
@@ -397,7 +409,6 @@ int main(int argc, char *argv[]) {
         int lin_solver        = 2;
         int solver_type       = 0;
         bool hradaptivity     = false;
-        bool move_bnd         = true;
         int combomet          = 0;
         bool exactaction      = false;
         double surface_fit_const = 0.0;
@@ -713,17 +724,17 @@ int main(int argc, char *argv[]) {
         //     movement boundary conditions.
         if (move_bnd == false)
         {
-          Array<int> ess_bdr(mesh->bdr_attributes.Max());
+          Array<int> ess_bdr(pmesh->bdr_attributes.Max());
           ess_bdr = 1;
           a.SetEssentialBC(ess_bdr);
         }
         else
         {
           int n = 0;
-          for (int i = 0; i < mesh->GetNBE(); i++)
+          for (int i = 0; i < pmesh->GetNBE(); i++)
           {
             const int nd = fespace->GetBE(i)->GetDof();
-            const int attr = mesh->GetBdrElement(i)->GetAttribute();
+            const int attr = pmesh->GetBdrElement(i)->GetAttribute();
             MFEM_VERIFY(!(dim == 2 && attr == 3),
                 "Boundary attribute 3 must be used only for 3D meshes. "
                 "Adjust the attributes (1/2/3/4 for fixed x/y/z/all "
@@ -733,10 +744,10 @@ int main(int argc, char *argv[]) {
           }
           Array<int> ess_vdofs(n);
           n = 0;
-          for (int i = 0; i < mesh->GetNBE(); i++)
+          for (int i = 0; i < pmesh->GetNBE(); i++)
           {
             const int nd = fespace->GetBE(i)->GetDof();
-            const int attr = mesh->GetBdrElement(i)->GetAttribute();
+            const int attr = pmesh->GetBdrElement(i)->GetAttribute();
             fespace->GetBdrElementVDofs(i, vdofs);
             if (attr == 1) // Fix x components.
             {
@@ -761,6 +772,7 @@ int main(int argc, char *argv[]) {
           }
           a.SetEssentialVDofs(ess_vdofs);
         }
+        fprintf(stderr,"ok4\n");
 
         // 14. As we use the Newton method to solve the resulting nonlinear system,
         //     here we setup the linear solver for the system's Jacobian.
@@ -806,6 +818,7 @@ int main(int argc, char *argv[]) {
           }
           S = minres;
         }
+        fprintf(stderr,"ok5\n");
 
         // Perform the nonlinear optimization.
         const IntegrationRule &ir =
@@ -833,6 +846,7 @@ int main(int argc, char *argv[]) {
           solver.SetAdaptiveLinRtol(solver_art_type, 0.5, 0.9);
         }
         solver.SetPrintLevel(verbosity_level >= 1 ? 1 : -1);
+        fprintf(stderr,"ok6\n");
 
         // hr-adaptivity solver.
         // If hr-adaptivity is disabled, r-adaptivity is done once using the
@@ -841,25 +855,29 @@ int main(int argc, char *argv[]) {
         // "h_per_r_iter" iterations of h-adaptivity after each r-adaptivity.
         // The solver terminates if an h-adaptivity iteration does not modify
         // any element in the mesh.
-        TMOPHRSolver hr_solver(*mesh, a, solver,
+        TMOPHRSolver hr_solver(*pmesh, a, solver,
             x, move_bnd, hradaptivity,
             mesh_poly_deg, h_metric_id,
             n_hr_iter, n_h_iter);
+        fprintf(stderr,"ok6.1\n");
         hr_solver.AddGridFunctionForUpdate(&x0);
         if (adapt_lim_const > 0.)
         {
           hr_solver.AddGridFunctionForUpdate(&adapt_lim_gf0);
           hr_solver.AddFESpaceForUpdate(&ind_fes);
         }
+        fprintf(stderr,"ok6.2\n");
         hr_solver.Mult();
+        fprintf(stderr,"ok7\n");
 
         // 15. Save the optimized mesh to a file. This output can be viewed later
         //     using GLVis: "glvis -m optimized.mesh".
         {
           ofstream mesh_ofs("optimized.mesh");
           mesh_ofs.precision(14);
-          mesh->Print(mesh_ofs);
+          pmesh->Print(mesh_ofs);
         }
+        fprintf(stderr,"ok8\n");
 
       }
       oh::Now t1 = oh::now();
