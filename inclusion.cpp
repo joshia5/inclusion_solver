@@ -104,6 +104,8 @@ void run_case(oh::Mesh* mesh, char const* vtk_path, oh::Int scale,
   //opts.max_length_allowed = 4.0*opts.max_length_desired;
   oh::Now t0 = oh::now();
  
+  printf("write mesh with size field\n");
+  oh::binary::write("/lore/joshia5/Meshes/curved/inclusion_3p_sizes.osh", mesh);
   for (int itr=0; itr<1; ++itr) {
   //while (approach_metric(mesh, opts)) {
     printf("approach metric %d\n",approach_metric(mesh, opts));
@@ -139,8 +141,8 @@ int main(int argc, char *argv[]) {
   auto lib = oh::Library();
   oh::Mesh o_mesh(&lib);
   //oh::binary::read ("../meshes/setup_1x1_3mil.osh", lib.world(), &o_mesh);
-  oh::binary::read ("/lore/joshia5/Meshes/curved/sphere_8.osh", lib.world(), &o_mesh);
-  //oh::binary::read ("../meshes/setup_1x1_crv-coarse.osh", lib.world(), &o_mesh);
+  //oh::binary::read ("/lore/joshia5/Meshes/curved/sphere_8.osh", lib.world(), &o_mesh);
+  oh::binary::read ("../meshes/setup_1x1_crv-coarse.osh", lib.world(), &o_mesh);
   
   if (o_mesh.is_curved() > 0) {
     printf("elevating to order 3\n");
@@ -219,11 +221,11 @@ int main(int argc, char *argv[]) {
     //ParMesh *pmesh = new ParOmegaMesh (MPI_COMM_WORLD, &o_mesh);
     {
       cout << "is NC" << pmesh->Nonconforming();
-      std::string mesh_path = "sphere_8.mesh";
-      ofstream mesh_ofs(mesh_path);
-      mesh_ofs.precision(8);
-      pmesh->Print(mesh_ofs);
-      while(1);
+      //std::string mesh_path = "sphere_8.mesh";
+      //ofstream mesh_ofs(mesh_path);
+      //mesh_ofs.precision(8);
+      //pmesh->Print(mesh_ofs);
+      //while(1);
     }
 
     int dim = pmesh->SpaceDimension();
@@ -376,7 +378,7 @@ int main(int argc, char *argv[]) {
     if (Itr+1 < max_iter) {
       run_case<3>(&o_mesh, Fname, Itr, myid, pOmesh, error_des);
     }
-    else {
+    else {/*
       fprintf(stderr, "calling TMOP\n");
       oh::Now t0 = oh::now();
       {
@@ -454,14 +456,6 @@ int main(int argc, char *argv[]) {
 
         TMOP_QualityMetric *h_metric = NULL;
 
-        /*
-        TMOP_WorstCaseUntangleOptimizer_Metric::BarrierType btype;
-        btype = TMOP_WorstCaseUntangleOptimizer_Metric::BarrierType::None;
-        TMOP_WorstCaseUntangleOptimizer_Metric::WorstCaseType wctype;
-        wctype = TMOP_WorstCaseUntangleOptimizer_Metric::WorstCaseType::None;
-        HessianCoefficient *adapt_coeff = NULL;
-        HRHessianCoefficient *hr_adapt_coeff = NULL;
-        */
         TMOP_QualityMetric *untangler_metric = NULL;
 
         TargetConstructor::TargetType target_t;
@@ -882,6 +876,7 @@ int main(int argc, char *argv[]) {
       }
       oh::Now t1 = oh::now();
       fprintf(stderr, "time in tmop %f\n", t1-t0);
+      */
     }
 
     if (o_mesh.is_curved() > 0) {
